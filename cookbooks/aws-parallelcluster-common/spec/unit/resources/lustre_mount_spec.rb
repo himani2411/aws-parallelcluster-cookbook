@@ -1,4 +1,5 @@
-require 'spec_helper'
+require_relative '../../../../aws-parallelcluster-shared/spec/spec_helper'
+
 
 describe 'lustre:mount' do
   for_all_oses do |platform, version|
@@ -6,7 +7,7 @@ describe 'lustre:mount' do
       context "on #{platform}#{version} and node type #{node_type}" do
         context 'for lustre' do
           cached(:chef_run) do
-            runner = ChefSpec::Runner.new(
+            runner = runner(
               platform: platform, version: version,
               step_into: ['lustre']
             ) do |node|
@@ -90,7 +91,7 @@ describe 'lustre:mount' do
 
         context 'for filecache' do
           cached(:chef_run) do
-            runner = ChefSpec::Runner.new(
+            runner = runner(
               platform: platform, version: version,
               step_into: ['lustre']
             ) do |node|
@@ -180,7 +181,7 @@ describe 'lustre:mount' do
 
         context 'for openzfs' do
           cached(:chef_run) do
-            runner = ChefSpec::Runner.new(
+            runner = runner(
               platform: platform, version: version,
               step_into: ['lustre']
             ) do |node|
@@ -255,7 +256,7 @@ describe 'lustre:mount' do
 
         context 'for ontap' do
           cached(:chef_run) do
-            runner = ChefSpec::Runner.new(
+            runner = runner(
               platform: platform, version: version,
               step_into: ['lustre']
             ) do |node|
@@ -346,7 +347,7 @@ describe 'lustre:unmount' do
     context "on #{platform}#{version}" do
       context 'for lustre' do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['lustre']
           ) do |node|
@@ -398,7 +399,7 @@ describe 'lustre:unmount' do
 
       context 'for OPENZFS, ONTAP' do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['lustre']
           ) do |node|
@@ -450,7 +451,7 @@ describe 'lustre:unmount' do
 
       context 'for FILECACHE' do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['lustre']
           ) do |node|

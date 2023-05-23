@@ -11,7 +11,7 @@ describe 'volume:mount' do
     context "on #{platform}#{version}" do
       context "when not yet mounted" do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(platform: platform, version: version, step_into: ['volume'])
+          runner = runner(platform: platform, version: version, step_into: ['volume'])
           runner.converge_dsl do
             volume 'mount' do
               shared_dir 'SHARED_DIR'
@@ -72,7 +72,7 @@ describe 'volume:mount' do
 
       context "when mounted and some properties are not set" do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(platform: platform, version: version, step_into: ['volume'])
+          runner = runner(platform: platform, version: version, step_into: ['volume'])
           runner.converge_dsl do
             volume 'mount' do
               shared_dir '/SHARED_DIR'
@@ -120,7 +120,7 @@ describe 'volume:unmount' do
     context "on #{platform}#{version}" do
       context "when not mounted" do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['volume']
           )
@@ -153,7 +153,7 @@ describe 'volume:unmount' do
 
       context "when mounted" do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['volume']
           )
@@ -192,7 +192,7 @@ describe 'volume:attach' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['volume']
         )
@@ -225,7 +225,7 @@ describe 'volume:detach' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['volume']
         )
@@ -251,7 +251,7 @@ describe 'volume:export' do
     context "on #{platform}#{version}" do
       cached(:vpc_cidr_list) { 'vpc_cidr_list' }
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['volume']
         )
@@ -281,7 +281,7 @@ describe 'volume:unexport' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['volume']
         )

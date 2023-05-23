@@ -19,7 +19,7 @@ describe 'install_packages:setup' do
       cached(:kernel_devel_pkg_version) { '3.10.0-1160.42.2.el7.x86_64' }
       cached(:amazon_extra_packages) { %w(amazon_extra_package1 amazon_extra_package2) }
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['install_packages']
         ) do |node|

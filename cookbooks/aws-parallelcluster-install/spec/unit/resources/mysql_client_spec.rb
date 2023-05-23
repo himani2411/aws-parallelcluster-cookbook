@@ -62,7 +62,7 @@ describe 'mysql_client:setup' do
           end
         end
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['mysql_client']
           ) do |node|

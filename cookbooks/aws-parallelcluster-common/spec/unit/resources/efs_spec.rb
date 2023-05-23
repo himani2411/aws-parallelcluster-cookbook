@@ -25,7 +25,7 @@ end
 describe 'efs:install_utils' do
   context "on amazon2" do
     let(:chef_run) do
-      ChefSpec::Runner.new(
+      runner(
         platform: 'amazon', version: '2',
         step_into: ['efs']
       ) do |node|
@@ -101,7 +101,7 @@ describe 'efs:install_utils' do
       context "utils package not yet installed" do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, false)
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['efs']
           ) do |node|
@@ -134,7 +134,7 @@ describe 'efs:install_utils' do
       context "utils package already installed" do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, true)
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['efs']
           ) do |node|
@@ -188,7 +188,7 @@ describe 'efs:install_utils' do
       context "utils package not yet installed" do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, false)
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['efs']
           ) do |node|
@@ -226,7 +226,7 @@ describe 'efs:install_utils' do
       context "utils package already installed" do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, true)
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['efs']
           ) do |node|
@@ -256,7 +256,7 @@ describe 'efs:mount' do
     %w(HeadNode ComputeFleet).each do |node_type|
       context "on #{platform}#{version} and node type #{node_type}" do
         cached(:chef_run) do
-          runner = ChefSpec::Runner.new(
+          runner = runner(
             platform: platform, version: version,
             step_into: ['efs']
           ) do |node|
@@ -342,7 +342,7 @@ describe 'efs:unmount' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
       cached(:chef_run) do
-        runner = ChefSpec::Runner.new(
+        runner = runner(
           platform: platform, version: version,
           step_into: ['efs']
         ) do |node|

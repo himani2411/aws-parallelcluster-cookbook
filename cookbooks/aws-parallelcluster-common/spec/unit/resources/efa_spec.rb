@@ -45,7 +45,7 @@ describe 'efa:setup' do
         end
       end
       let(:chef_run) do
-        ChefSpec::Runner.new(
+        runner(
           platform: platform, version: version,
           step_into: ['efa']
         ) do |node|
@@ -155,9 +155,9 @@ describe 'efa:setup' do
 
   context 'when rhel version is older than 8.4' do
     cached(:chef_run) do
-      runner = ChefSpec::Runner.new(
+      runner = runner(
         # Create a runner for the given platform/version
-        platform: "redhat",
+        platform: "redhat", version: "8",
         step_into: ['efa']
       ) do |node|
         node.automatic['platform_version'] = "8.3"
@@ -176,7 +176,7 @@ describe 'efa:configure' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
       let(:chef_run) do
-        ChefSpec::Runner.new(
+        runner(
           platform: platform, version: version,
           step_into: ['efa']
         )

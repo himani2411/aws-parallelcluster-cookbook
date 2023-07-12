@@ -46,3 +46,10 @@ template '/etc/sudoers.d/99-parallelcluster-slurm' do
   group 'root'
   mode '0600'
 end
+# Testing removal of sudo access for default user
+template '/etc/sudoers.d/99-parallelcluster-revoke-sudo-access' do
+  source 'slurm/99-parallelcluster-revoke-sudo.erb'
+  owner 'root'
+  group 'root'
+  mode '0600'
+end

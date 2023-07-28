@@ -20,7 +20,7 @@ default['cluster']['nvidia']['gdrcopy']['service'] = 'gdrdrv'
 
 # NVIDIA fabric-manager
 # The package name of Fabric Manager for ubuntu is nvidia-fabricmanager-470_version
-default['cluster']['nvidia']['fabricmanager']['package'] = "nvidia-fabricmanager-470"
+default['cluster']['nvidia']['fabricmanager']['package'] = "nvidia-fabricmanager-535"
 default['cluster']['nvidia']['fabricmanager']['repository_key'] = "3bf863cc.pub"
 # with apt a star is needed to match the package version
 default['cluster']['nvidia']['fabricmanager']['version'] = "#{node['cluster']['nvidia']['driver_version']}*"

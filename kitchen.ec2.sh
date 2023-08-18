@@ -65,7 +65,7 @@ fi
 : "${KITCHEN_AWS_REGION:=${AWS_DEFAULT_REGION:-eu-west-1}}"
 : "${KITCHEN_KEY_NAME:=kitchen}"
 : "${KITCHEN_SSH_KEY_PATH:="~/.ssh/${KITCHEN_KEY_NAME}-${KITCHEN_AWS_REGION}.pem"}"
-: "${KITCHEN_AVAILABILITY_ZONE:=a}"
+: "${KITCHEN_AVAILABILITY_ZONE:=f}"
 
 if [ "$1" == "create" ] || [ "$1" == "converge" ] || [ "$1" == "verify" ] || [ "$1" == "destroy" ] || [ "$1" == "test" ]; then
   # Subnet

@@ -50,7 +50,7 @@ bash 'cuda.run advanced' do
   cwd '/tmp'
   code <<-CUDA
     set -e
-    ./cuda.run --silent --toolkit --samples
+    ./cuda.run --driver --silent --toolkit --samples
     rm -f /tmp/cuda.run
   CUDA
   creates "/usr/local/cuda-#{cuda_version}"

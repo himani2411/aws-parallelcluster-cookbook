@@ -139,5 +139,5 @@ def main():
 
 
 if __name__ == "__main__":
-    print("Who is running ec2_dev_2_volid.py "+os.getlogin())
+    syslog.syslog("Who is running ec2_dev_2_volid.py "+os.getlogin())
     main()

@@ -14,14 +14,6 @@
 
 include_recipe "aws-parallelcluster-platform::enable_chef_error_handler"
 
-# Testing removal of sudo access for default user
-template '/etc/sudoers.d/99-parallelcluster-revoke-sudo-access' do
-  source '99-parallelcluster-revoke-sudo.erb'
-  owner 'root'
-  group 'root'
-  mode '0600'
-end
-
 os_type 'Validate OS type specified by the user is the same as the OS identified by Ohai'
 
 # Validate init system
@@ -34,3 +26,11 @@ fetch_config 'Fetch and load cluster configs'
 
 include_recipe "aws-parallelcluster-computefleet::init"
 include_recipe "aws-parallelcluster-slurm::init"
+
+# Testing removal of sudo access for default user
+template '/etc/sudoers.d/99-parallelcluster-revoke-sudo-access' do
+  source '99-parallelcluster-revoke-sudo.erb'
+  owner 'root'
+  group 'root'
+  mode '0600'
+end

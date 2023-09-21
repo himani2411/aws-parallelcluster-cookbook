@@ -19,4 +19,14 @@ when 'HeadNode'
     source 'shared_storages/shared_storages_data.erb'
     mode '0644'
   end
+
+  # Disable sudo access for default user
+  template '/etc/sudoers.d/99-parallelcluster-revoke-sudo-access' do
+    only_if { node['cluster']['disable_sudo_access_for_default_user'] == 'false' }
+    source 'disable-sudo/99-parallelcluster-revoke-sudo.erb'
+    owner 'root'
+    group 'root'
+    mode '0600'
+  end
+  
 end

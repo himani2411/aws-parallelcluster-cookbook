@@ -21,3 +21,5 @@ when 'HeadNode'
 when 'ComputeFleet'
   include_recipe 'aws-parallelcluster-slurm::finalize_compute'
 end
+
+disable_sudo_access 'Update sudo access for default user'

@@ -18,6 +18,7 @@ default_action :setup
 property :disable_sudo_access, String
 
 action :setup do
+  return unless node['cluster']['node_type'] == 'HeadNode'
   node['cluster']['disable_sudo_access_for_default_user'] == 'true' ? action_disable : action_enable
 end
 

@@ -63,13 +63,8 @@ describe 'aws-parallelcluster-environment::update_fs_mapping' do
         end
         cached(:node) { chef_run.node }
 
-        it 'generates the file shared_storages_data' do
-          is_expected.to create_template("#{node['cluster']['etc_dir']}/shared_storages_data.yaml").with(
-            source: "shared_storages/shared_storages_data.erb",
-            owner: 'root',
-            group: 'root',
-            mode: '0644'
-          )
+        it 'does nothing' do
+          is_expected.not_to create_template("#{node['cluster']['etc_dir']}/shared_storages_data.yaml")
         end
       end
     end

@@ -20,8 +20,6 @@ when 'HeadNode'
   include_recipe 'aws-parallelcluster-slurm::update_head_node'
 when 'ComputeFleet'
   include_recipe 'aws-parallelcluster-slurm::update_compute'
-when 'LoginNode'
-  include_recipe 'aws-parallelcluster-slurm::update_login_node'
 else
-  raise "node_type must be HeadNode, ComputeFleet or LoginNode"
+  raise "node_type must be HeadNode or ComputeFleet"
 end

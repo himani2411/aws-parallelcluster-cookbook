@@ -63,15 +63,13 @@ describe 'aws-parallelcluster-slurm::update' do
             RSpec::Mocks.configuration.allow_message_expectations_on_nil = true
 
             node.override['cluster']['node_type'] = 'LoginNode'
-            node.override['ec2']['instance_id'] = "MOCK_INSTANCE_ID"
-            node.override['cluster']['cluster_config_version'] = "MOCK_CLUSTER_CONFIG_VERSION"
           end
           runner.converge(described_recipe)
         end
         cached(:node) { chef_run.node }
 
-        it 'includes the recipe to update the login node' do
-          is_expected.to include_recipe('aws-parallelcluster-slurm::update_login_node')
+        it 'raises an error' do
+          expect { chef_run }.to raise_error(RuntimeError).with_message('node_type must be HeadNode or ComputeFleet')
         end
       end
 
@@ -89,8 +87,7 @@ describe 'aws-parallelcluster-slurm::update' do
         cached(:node) { chef_run.node }
 
         it 'raises an error' do
-          expect { chef_run }.to raise_error(RuntimeError)
-            .with_message('node_type must be HeadNode, ComputeFleet or LoginNode')
+          expect { chef_run }.to raise_error(RuntimeError).with_message('node_type must be HeadNode or ComputeFleet')
         end
       end
     end

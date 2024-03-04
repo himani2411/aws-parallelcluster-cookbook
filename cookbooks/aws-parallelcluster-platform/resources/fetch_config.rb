@@ -15,6 +15,7 @@ action :run do
 
   sync_file_compute_nodes = "#{node['cluster']['shared_dir']}/cluster-config-version"
   sync_file_login_nodes = "#{node['cluster']['shared_dir_login_nodes']}/cluster-config-version"
+  login_node_keys_sync_file = "#{node['cluster']['shared_login_nodes_keys_sync_file']}"
 
   case node['cluster']['node_type']
   when 'HeadNode'
@@ -33,6 +34,10 @@ action :run do
       fetch_instance_type_data unless ::FileUtils.identical?(node['cluster']['previous_cluster_config_path'], node['cluster']['cluster_config_path'])
       Chef::Log.info("Backing up old shared storages data from (#{node['cluster']['shared_storages_mapping_path']}) to (#{node['cluster']['previous_shared_storages_mapping_path']})")
       ::FileUtils.cp_r(node['cluster']['shared_storages_mapping_path'], node['cluster']['previous_shared_storages_mapping_path'], remove_destination: true)
+
+      Chef::Log.info("Updating #{login_node_keys_sync_file} during #{node['cluster']['node_type']} update")
+      write_sync_file(login_node_keys_sync_file)
+
     else
       fetch_cluster_config(node['cluster']['cluster_config_path']) unless ::File.exist?(node['cluster']['cluster_config_path'])
       fetch_instance_type_data unless ::File.exist?(node['cluster']['instance_types_data_path'])
@@ -76,6 +81,7 @@ action :run do
     if kitchen_test?
       fetch_cluster_config(node['cluster']['login_cluster_config_path']) unless ::File.exist?(node['cluster']['login_cluster_config_path'])
       write_config_version_file(sync_file_login_nodes)
+      write_sync_file(login_node_keys_sync_file)
     end
 
     if new_resource.update

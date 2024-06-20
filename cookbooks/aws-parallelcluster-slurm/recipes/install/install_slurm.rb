@@ -99,7 +99,7 @@ bash 'make install' do
     shopt -u nullglob
 
     # Configure Slurm
-    ./configure --prefix=#{slurm_install_dir} --with-pmix=/opt/pmix --with-jwt=/opt/libjwt --enable-slurmrestd --with-hdf5=yes
+    ./configure --prefix=#{slurm_install_dir} --with-pmix=/opt/pmix --with-jwt=/opt/libjwt --enable-slurmrestd --with-hdf5=/usr/bin/h5cc
 
     # Build Slurm
     CORES=$(grep processor /proc/cpuinfo | wc -l)

@@ -1,0 +1,5 @@
+[parallelcluster-update]
+triggers=post.update
+path=Resources.<%= @launch_template_resource_id %>.Metadata.AWS::CloudFormation::Init
+action=PATH=/usr/local/bin:/bin:/usr/bin:/opt/aws/bin; . /usr/bin/cloud-init -d single -n write-files; . /etc/parallelcluster/pcluster_cookbook_environment.sh; cinc-client --local-mode --config /etc/chef/client.rb --log_level info --logfile /var/log/chef-client.log --force-formatter --no-color --chef-zero-port 8889 --json-attributes /etc/chef/dna.json --override-runlist aws-parallelcluster-entrypoints::update && <%= shared_dir %>/fetch_and_run -postupdate
+runas=root

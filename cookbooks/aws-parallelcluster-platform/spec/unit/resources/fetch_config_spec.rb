@@ -160,3 +160,41 @@ describe 'fetch_config:run' do
     end
   end
 end
+
+
+describe 'fetch_config:share_common_dna' do
+  context "when running on HeadNode from kitchen" do
+    cached(:file_path) { '/tmp/common-dna.json' }
+    cached(:chef_run) do
+      runner = ChefSpec::Runner.new(
+        platform: 'ubuntu', step_into: %w(fetch_config)
+      ) do |node|
+        node.override['kitchen'] = true
+        node.override['cluster']['node_type'] = 'HeadNode'
+        node.override['cluster']['cluster_s3_bucket'] = 'BUCKET'
+        node.override['cluster']['region'] = 'REGION'
+        node.override['cluster']['common_dna_s3_key'] = 'COMMON_S3_DNA_PREFIX'
+        node.override['cluster']['system_pyenv_root'] = 'pyenv'
+        node.override['cluster']['python-version'] = 'pyversion'
+      end
+      runner.converge_dsl do
+        fetch_config 'share_common_dna' do
+          action :share_common_dna
+        end
+      end
+    end
+
+    it "executes command to update HeadNode Private IP in common-dna.json file" do
+      allow_any_instance_of(Object).to receive(:get_primary_ip).and_return('IP')
+      is_expected.to run_execute("Update HeadNode Ip").with(command:"sed -i 's/HEAD_NODE_PRIVATE_IP/#{get_primary_ip}/g' /tmp/common-dna.json")
+    end
+
+    it "uploads common-dna.json in S3" do
+      is_expected.to run_execute("upload_common_dna_to_s3").with(command: "pyenv/versions/pyversion/envs/cookbook_virtualenv/bin/aws s3api put-object" \
+                         " --bucket BUCKET" \
+                         " --key COMMON_S3_DNA_PREFIX" \
+                         " --region REGION" \
+                         " --body /tmp/common-dna.json")
+    end
+  end
+end

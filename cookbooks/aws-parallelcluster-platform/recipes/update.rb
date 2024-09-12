@@ -15,6 +15,10 @@
 # OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions and
 # limitations under the License.
 
+fetch_config 'Upload Common Dna to s3' do
+  action :share_common_dna
+end
+
 fetch_config 'Fetch and load cluster configs' do
   update true
 end

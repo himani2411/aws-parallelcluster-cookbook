@@ -23,5 +23,5 @@ use 'partial/_install_from_tar'
 use 'partial/_mount_umount'
 
 def prerequisites
-  %w(rpm-build make)
+  %w(rpm-build make rust cargo)
 end

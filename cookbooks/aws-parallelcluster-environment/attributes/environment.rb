@@ -77,3 +77,7 @@ default['cluster']['efa']['sha256'] = 'bd68839e741b0afd3ec2e37d50603803cfa7a279c
 default['cluster']['spack_shared_dir'] = "#{node['cluster']['shared_dir']}/spack"
 default['cluster']['spack']['version'] = '0.20.2'
 default['cluster']['spack']['sha256'] = '62f87ab6ca332118f2812a255edcf4be4977623d067b9396251ce8c44b158e49'
+
+## Efs-util Version
+default['cluster']['efs_utils']['version'] = '2.1.0'
+default['cluster']['efs_utils']['sha256'] = '2996bdd5387131d302310812fa1e07e1be00f80814a580f5dfeb27d68519fd24'

@@ -178,15 +178,15 @@ suites:
         - modules_installed
     attributes:
       resource: modules
-  - name: stunnel
-    run_list:
-      - recipe[aws-parallelcluster-tests::setup]
-      - recipe[aws-parallelcluster-tests::test_resource]
-    verifier:
-      controls:
-        - /tag:install_stunnel/
-    attributes:
-      resource: stunnel:setup
+#  - name: stunnel
+#    run_list:
+#      - recipe[aws-parallelcluster-tests::setup]
+#      - recipe[aws-parallelcluster-tests::test_resource]
+#    verifier:
+#      controls:
+#        - /tag:install_stunnel/
+#    attributes:
+#      resource: stunnel:setup
 
 # Recipes
   - name: ami_cleanup

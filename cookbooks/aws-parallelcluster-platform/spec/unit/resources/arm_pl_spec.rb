@@ -16,7 +16,7 @@ describe 'arm_pl:setup' do
       cached(:aws_region) { 'test_region' }
       cached(:aws_domain) { 'test_domain' }
       cached(:armpl_major_minor_version) do
-        '23.10'
+        '24.04'
       end
 
       cached(:armpl_platform) do
@@ -43,11 +43,12 @@ describe 'arm_pl:setup' do
       cached(:gcc_patch_version) { '0' }
       cached(:sources_dir) { 'sources_test_dir' }
       cached(:modulefile_dir) { platform == 'ubuntu' ? '/usr/share/modules/modulefiles' : '/usr/share/Modules/modulefiles' }
+      cached(:package_manager) { platform == 'ubuntu' ? 'deb' : 'rpm' }
       cached(:armpl_version) { "#{armpl_major_minor_version}" }
-      cached(:armpl_tarball_name) { "arm-performance-libraries_#{armpl_version}_#{armpl_platform}_gcc-#{gcc_major_minor_version}.tar" }
+      cached(:armpl_tarball_name) { "arm-performance-libraries_#{armpl_version}_#{package_manager}_gcc.tar" }
       cached(:armpl_url) { "https://bucket.s3.amazonaws.com/archives/armpl/#{armpl_platform}/#{armpl_tarball_name}" }
       cached(:armpl_installer) { "#{sources_dir}/#{armpl_tarball_name}" }
-      cached(:armpl_name) { "arm-performance-libraries_#{armpl_version}_#{armpl_platform}" }
+      cached(:armpl_name) { "arm-performance-libraries_#{armpl_version}_#{package_manager}" }
       cached(:gcc_version) { "#{gcc_major_minor_version}.#{gcc_patch_version}" }
       cached(:gcc_url) { "https://bucket.s3.amazonaws.com/archives/dependencies/gcc/gcc-#{gcc_version}.tar.gz" }
       cached(:gcc_tarball) { "#{sources_dir}/gcc-#{gcc_version}.tar.gz" }
@@ -131,7 +132,7 @@ describe 'arm_pl:setup' do
           armpl_license_dir = if armpl_major_minor_version == "21.0"
                                 "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_major_minor_version}_gcc-#{gcc_major_minor_version}/license_terms"
                               else
-                                "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_gcc-#{gcc_major_minor_version}/license_terms"
+                                "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_#{package_manager}/license_terms"
                               end
           is_expected.to create_template("#{modulefile_dir}/armpl/#{armpl_version}").with(
             source: 'arm_pl/armpl_modulefile.erb',

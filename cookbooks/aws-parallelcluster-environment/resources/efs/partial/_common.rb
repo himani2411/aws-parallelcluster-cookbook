@@ -3,7 +3,7 @@ unified_mode true
 default_action :install_utils
 
 property :efs_utils_version, String, default: node['cluster']['efs_utils']['version']
-property :efs_utils_checksum, String, default: node['cluster']['efs_utils']['version']
+property :efs_utils_checksum, String, default: node['cluster']['efs_utils']['sha256']
 
 def already_installed?(package_name, expected_version)
   Gem::Version.new(get_package_version(package_name)) >= Gem::Version.new(expected_version)

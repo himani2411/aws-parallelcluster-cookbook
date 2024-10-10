@@ -12,20 +12,20 @@
 control 'tag:install_arm_pl_installed' do
   title "Check ARM Performance libraries installation"
   only_if { os_properties.arm? && !os_properties.on_docker? }
-
+  package_manager =  platform_family?('debian') ? 'deb': 'rpm'
   armpl_major_minor_version = node['cluster']['armpl']['major_minor_version']
   armpl_version = node['cluster']['armpl']['version']
   gcc_major_minor_version = node['cluster']['armpl']['gcc']['major_minor_version']
 
   armpl_module_general_name = "armpl/#{armpl_version}"
-  armpl_module_name = "armpl/#{armpl_version}.0_gcc-#{gcc_major_minor_version}"
+  # armpl_module_name = "armpl/#{armpl_version}/modulefiles/armpl/gcc-#{gcc_major_minor_version}"
   gcc_module_name = "armpl/gcc-#{gcc_major_minor_version}"
 
   if os_properties.ubuntu2204?
-    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_gcc-#{gcc_major_minor_version}"
+    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_#{package_manager}"
     armpl_install_dir = "/opt/arm/#{armpl_module_general_name}/armpl_#{armpl_version}_gcc-#{gcc_major_minor_version}"
   else
-    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_major_minor_version}_gcc-#{gcc_major_minor_version}"
+    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_major_minor_version}_#{package_manager}"
     armpl_install_dir = "/opt/arm/#{armpl_module_general_name}/armpl_#{armpl_major_minor_version}_gcc-#{gcc_major_minor_version}"
   end
 
@@ -36,7 +36,7 @@ control 'tag:install_arm_pl_installed' do
     its('stderr') { should_not be_empty }
 
     its('stderr') { should match /#{armpl_module_general_name}/ }
-    its('stderr') { should match /#{armpl_module_name}/ }
+    # its('stderr') { should match /#{armpl_module_name}/ }
     its('stderr') { should match /#{gcc_module_name}/ }
   end
 

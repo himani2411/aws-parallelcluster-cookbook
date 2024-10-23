@@ -202,6 +202,8 @@ ruby_block "Configure Slurm Accounting" do
   not_if { node['cluster']['config'].dig(:Scheduling, :SlurmSettings, :Database).nil? }
 end unless on_docker?
 
+include_recipe 'aws-parallelcluster-slurm::install_pyxis'
+
 service "slurmctld" do
   supports restart: false
   action %i(enable start)

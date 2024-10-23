@@ -23,4 +23,3 @@ munge 'Install munge' do
   action :setup
 end
 include_recipe 'aws-parallelcluster-slurm::install_slurm'
-include_recipe 'aws-parallelcluster-slurm::install_pyxis'

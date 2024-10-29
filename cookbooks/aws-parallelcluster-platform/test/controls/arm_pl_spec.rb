@@ -12,7 +12,11 @@
 control 'tag:install_arm_pl_installed' do
   title "Check ARM Performance libraries installation"
   only_if { os_properties.arm? && !os_properties.on_docker? }
-  package_manager =  platform_family?('debian') ? 'deb': 'rpm'
+  package_manager = if os.debian?
+                      'deb'
+                    else
+                      'rpm'
+                    end
   armpl_major_minor_version = node['cluster']['armpl']['major_minor_version']
   armpl_version = node['cluster']['armpl']['version']
   gcc_major_minor_version = node['cluster']['armpl']['gcc']['major_minor_version']
@@ -22,14 +26,20 @@ control 'tag:install_arm_pl_installed' do
   gcc_module_name = "armpl/gcc-#{gcc_major_minor_version}"
 
   if os_properties.ubuntu2204?
-    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_#{package_manager}"
+    # armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_#{package_manager}" # This is the correct path but somehow it gets overriden
+    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_gcc"
     armpl_install_dir = "/opt/arm/#{armpl_module_general_name}/armpl_#{armpl_version}_gcc-#{gcc_major_minor_version}"
   else
-    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_major_minor_version}_#{package_manager}"
+    # armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_major_minor_version}_#{package_manager}" # This is the correct path but somehow it gets overriden
+    armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_major_minor_version}_gcc"
     armpl_install_dir = "/opt/arm/#{armpl_module_general_name}/armpl_#{armpl_major_minor_version}_gcc-#{gcc_major_minor_version}"
   end
 
-  setup = "unset MODULEPATH && source /etc/profile.d/modules.sh"
+  setup = "unset MODULEPATH && source /etc/profile.d/modules.sh" # gives below output armpl/24.04(54):ERROR:105: Unable to locate a modulefile for '/opt/arm/armpl/24.04/modulefiles/armpl'
+  # Use of the free of charge version of Arm Performance Libraries is subject to the terms and conditions of the Arm Performance Libraries (free version) -  End User License Agreement (EULA). A copy of the EULA can be found in the '/opt/arm/armpl/24.04/arm-performance-libraries_24.04_rpm/license_terms' folder
+  # Currently Loaded Modulefiles:
+  #                    1) /opt/arm/armpl/24.04/modulefiles/armpl/gcc-9.3   2) armpl/24.04
+
 
   describe bash("#{setup} && module load #{armpl_module_general_name} && module list") do
     its('exit_status') { should eq(0) }

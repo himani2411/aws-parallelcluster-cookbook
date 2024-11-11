@@ -7,6 +7,11 @@ This file is used to list changes made in each version of the AWS ParallelCluste
 ------
 
 **CHANGES**
+- Upgrade NICE DCV to version `2023.1-17701`.
+  - server: `2023.1.17701-1`
+  - xdcv: `2023.1.565-1`
+  - gl: `2023.1.1047-1`
+  - web_viewer: `2023.1.17701-1`
 
 **BUG FIXES**
 - Fix an issue in the way we get region when manage volumes so that it can correctly handle local zone.

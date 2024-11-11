@@ -18,13 +18,13 @@ def dcv_sha256sum
     case el_string
     when "el7"
       # ALINUX2
-      'f921c50a1f98fc945ac0f740f4181a52fb66b4b70bf13c1b2321823a9ec7e95a'
+      'e44f3c06e1830ccc52d25995227bbbb2060bc81a9623420ade8ef69317784fdd'
     when "el8"
       # RHEL and Rocky8
-      '4d4b794467220ec1b0f3272b6938701ce1282664e25f63497cc30632d71aed17'
+      '2192d084fd7d1bfeaa183b5d6d97ba0aaf6854491bcbd3bee3f8095f025449a3'
     when "el9"
       # RHEL and Rocky9
-      'a74ee7376bf8595b95386352ff3f95eb5886e7bbc8b8512c53a48be1d3ec6282'
+      'fc56494748a717e05694d9cba653436901921ca46b6d33789bea9eaf544a74e6'
     else
       ''
     end
@@ -32,13 +32,13 @@ def dcv_sha256sum
     case el_string
     when "el7"
       # ALINUX2
-      '31230edd66242038a95986c9207fc0f800986a94ee43bfc901e43521f4eb72a6'
+      'dd63c2aad943e2c106ac4e519c308bba4786eb1e4c11674bedad9111c65c6230'
     when "el8"
       # RHEL and Rocky8
-      '9f696bfc21fdfd267a079cd222170b7c737f789ec6f3da66a6666bc1d8fe2648'
+      'dc459ee21224cb75ff155d9332e27bc2fac80f311df290bda7c8c023f43925bd'
     when "el9"
       # RHEL and Rocky9
-      '98a928194ff4c2ee21b52c3ab575ca93e60ca5475bd7bfda1561a5c6adffd7ca'
+      '673ac2bb4c10b4d5a7140066a968117212e597cf47b0a570ad19cad772d67c64'
     else
       ''
     end

@@ -21,5 +21,5 @@ use 'partial/_ubuntu_common'
 
 def dcv_sha256sum
   # Ubuntu20 supports DCV on x86
-  '5151ad6b589dc573e2e067aed0389913e9ecd50bec81935b12e4f952ef14cc56'
+  '20886a9f4da552ef99f5a0e39d2ea6e46d3ae2aad6eb510eae3658077d775ef3'
 end

@@ -14,6 +14,6 @@ DEFAULT_USER=<%= node['cluster']['cluster_user'] %>
 TERMINATION_MESSAGE=$1
 GRACETIME_PERIOD=$2
 
-echo "AllowUsers $DEFAULT_USER" >> /etc/ssh/sshd_config
+echo "AllowUsers $DEFAULT_USER ssm-user" >> /etc/ssh/sshd_config
 systemctl reload sshd
 wall "$TERMINATION_MESSAGE"

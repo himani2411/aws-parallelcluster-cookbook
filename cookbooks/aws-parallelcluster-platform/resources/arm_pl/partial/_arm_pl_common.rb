@@ -30,9 +30,6 @@ property :aws_domain, String
 property :armpl_major_minor_version, String, default: '24.10'
 property :gcc_patch_version, String, default: '0'
 
-action :arm_pl_prerequisite do
-  # Do nothing
-end
 
 action :setup do
   return unless node['conditions']['arm_pl_supported']
@@ -49,14 +46,14 @@ action :setup do
   build_tools 'Prerequisite: build tools'
   package %w(wget bzip2)
 
-  action_arm_pl_prerequisite
 
   armpl_version = "#{new_resource.armpl_major_minor_version}"
   armpl_tarball_name = "arm-performance-libraries_#{armpl_version}_#{package_manager}_gcc.tar"
 
+  armpl_test_url =  "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_#{armpl_version}"
+
   armpl_url = %W(
-    #{node['cluster']['artifacts_s3_url']}
-    armpl/#{armpl_platform}
+    #{armpl_test_url}
     #{armpl_tarball_name}
   ).join('/')
 
@@ -92,7 +89,7 @@ action :setup do
   armpl_license_dir = if new_resource.armpl_major_minor_version == "21.0"
                         "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{new_resource.armpl_major_minor_version}_gcc-#{gcc_major_minor_version}/license_terms"
                       else
-                        "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_#{package_manager}/license_terms"
+                        "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_gcc/license_terms"
                       end
 
   # arm performance library modulefile configuration

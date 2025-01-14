@@ -16,7 +16,7 @@ describe 'arm_pl:setup' do
       cached(:aws_region) { 'test_region' }
       cached(:aws_domain) { 'test_domain' }
       cached(:armpl_major_minor_version) do
-        '24.04'
+        '24.10'
       end
 
       cached(:armpl_platform) do

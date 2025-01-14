@@ -27,7 +27,7 @@ property :aws_domain, String
 # We upload ArmPL to a ParallelCluster bucket (account for it in scope of the upgrade) and download it from there
 # to install ArmPL on the AMI.
 # We download gcc directly from gnu.org repository to install correct gcc version on the AMI.
-property :armpl_major_minor_version, String, default: '24.04'
+property :armpl_major_minor_version, String, default: '24.10'
 property :gcc_patch_version, String, default: '0'
 
 action :arm_pl_prerequisite do

@@ -16,7 +16,8 @@
 # limitations under the License.
 
 jwt_version = '1.18.3'
-jwt_url = "#{node['cluster']['artifacts_s3_url']}/dependencies/jwt/v#{jwt_version}.tar.gz"
+# jwt_url = "#{node['cluster']['artifacts_s3_url']}/dependencies/jwt/v#{jwt_version}.tar.gz"
+jwt_url = "https://github.com/benmcollins/libjwt/archive/refs/tags/v#{jwt_version}.tar.gz"
 jwt_tarball = "#{node['cluster']['sources_dir']}/libjwt-#{jwt_version}.tar.gz"
 jwt_sha256 = 'cf5c79c98d8330520b3f5099d594f23bb0f98cbd1743b72a8627b1cb1ab18e7b'
 

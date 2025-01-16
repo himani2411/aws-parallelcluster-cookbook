@@ -16,10 +16,11 @@ require 'spec_helper'
 describe 'aws-parallelcluster-slurm::install_jwt' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do
-      cached(:cluster_artifacts_s3_url) { 'https://REGION-aws-parallelcluster.s3.REGION.AWS_DOMAIN' }
       cached(:cluster_sources_dir) { '/path/to/cluster/sources/dir' }
+      cached(:cluster_artifacts_s3_url) { 'https://github.com/benmcollins/libjwt/archive' }
       cached(:jwt_version) { '1.18.3' }
       cached(:jwt_checksum) { 'cf5c79c98d8330520b3f5099d594f23bb0f98cbd1743b72a8627b1cb1ab18e7b' }
+
 
       cached(:chef_run) do
         runner = runner(platform: platform, version: version) do |node|
@@ -34,7 +35,7 @@ describe 'aws-parallelcluster-slurm::install_jwt' do
 
       it 'downloads libjwt' do
         is_expected.to create_if_missing_remote_file("#{cluster_sources_dir}/libjwt-#{jwt_version}.tar.gz").with(
-          source: "#{cluster_artifacts_s3_url}/dependencies/jwt/v#{jwt_version}.tar.gz",
+          source: "#{cluster_artifacts_s3_url}/refs/tags//v#{jwt_version}.tar.gz",
           mode: '0644',
           retries: 3,
           retry_delay: 5,

@@ -18,8 +18,8 @@ describe 'aws-parallelcluster-slurm::install_jwt' do
     context "on #{platform}#{version}" do
       cached(:cluster_sources_dir) { '/path/to/cluster/sources/dir' }
       cached(:cluster_artifacts_s3_url) { 'https://github.com/benmcollins/libjwt/archive' }
-      cached(:jwt_version) { '1.18.3' }
-      cached(:jwt_checksum) { 'cf5c79c98d8330520b3f5099d594f23bb0f98cbd1743b72a8627b1cb1ab18e7b' }
+      cached(:jwt_version) { '2.1.1' }
+      cached(:jwt_checksum) { '5a057e536e92a0fb27785207799753fefad703ba95d8a18dfb3ae4a4a9d54a0f' }
 
 
       cached(:chef_run) do

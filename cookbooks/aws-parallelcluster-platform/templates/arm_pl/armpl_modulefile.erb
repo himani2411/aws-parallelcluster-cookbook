@@ -27,9 +27,6 @@ puts stderr "At compile time add '-I<armpl_include>' and at link time"
   puts stderr "64-bit integers & OpenMP       ARMPL_INCLUDES_ILP64_MP      armpl_ilp64_mp"
   }
 
-  # Add license path
-  setenv ARM_LICENSE_DIR <%= @armpl_license_dir %> # Not being used
-
   # Load the pre-installed gcc module
   module load $root/modulefiles/armpl/gcc-${gcc_version}
 

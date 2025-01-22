@@ -86,11 +86,7 @@ action :setup do
   # create armpl module directory
   directory "#{modulefile_dir}/armpl"
 
-  armpl_license_dir = if new_resource.armpl_major_minor_version == "21.0"
-                        "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{new_resource.armpl_major_minor_version}_gcc-#{gcc_major_minor_version}/license_terms"
-                      else
-                        "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_gcc/license_terms"
-                      end
+  armpl_license_dir = "/opt/arm/armpl/#{armpl_version}/arm-performance-libraries_#{armpl_version}_gcc/license_terms"
 
   # arm performance library modulefile configuration
   template "#{modulefile_dir}/armpl/#{armpl_version}" do
@@ -101,7 +97,6 @@ action :setup do
     mode '0755'
     variables(
       armpl_version: armpl_version,
-      armpl_major_minor_version: new_resource.armpl_major_minor_version,
       armpl_license_dir: armpl_license_dir,
       gcc_major_minor_version: gcc_major_minor_version
     )
@@ -164,7 +159,6 @@ action :setup do
   # save ArmPL and gcc versions on the node environment so that they will be available
   # to dependencies (for instance, test code)
   # Complete versions are intentionally redundant.
-  node.default['cluster']['armpl']['major_minor_version'] = new_resource.armpl_major_minor_version
   node.default['cluster']['armpl']['version'] = armpl_version
   node.default['cluster']['armpl']['gcc']['major_minor_version'] = gcc_major_minor_version
   node.default['cluster']['armpl']['gcc']['patch_version'] = new_resource.gcc_patch_version

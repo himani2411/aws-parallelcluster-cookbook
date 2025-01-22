@@ -41,7 +41,7 @@ bash 'libjwt' do
     tar xf #{jwt_tarball} --no-same-owner
     cd libjwt-#{jwt_version}
     autoreconf --force --install
-    ./configure --prefix=/opt/libjwt
+    ./configure --with-openssl --prefix=/opt/libjwt 
     CORES=$(grep processor /proc/cpuinfo | wc -l)
     make -j $CORES
     sudo make install

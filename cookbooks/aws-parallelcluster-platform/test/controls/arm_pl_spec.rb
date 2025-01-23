@@ -17,7 +17,7 @@ control 'tag:install_arm_pl_installed' do
   gcc_major_minor_version = node['cluster']['armpl']['gcc']['major_minor_version']
 
   armpl_module_general_name = "armpl/#{armpl_version}"
-  armpl_module_name = "armpl/#{armpl_version}.0_gcc-#{gcc_major_minor_version}"
+  armpl_module_name = "armpl/#{armpl_version}.0_gcc"
   gcc_module_name = "armpl/gcc-#{gcc_major_minor_version}"
 
   armpl_script_dir = "/opt/arm/#{armpl_module_general_name}/arm-performance-libraries_#{armpl_version}_gcc"
@@ -45,14 +45,14 @@ control 'tag:install_arm_pl_installed' do
   scl_centos7 = "scl enable devtoolset-8" if os_properties.centos?
 
   describe bash("#{setup} && module load #{armpl_module_general_name} && "\
-                "cd #{armpl_install_dir}/examples && "\
+                "cd #{armpl_install_dir}/examples_lp64 && "\
                 "make clean && #{scl_centos7} make") do
     its('exit_status') { should eq(0) }
     its('stdout') { should match /testing: no example difference files were generated/i }
     its('stdout') { should match /test passed ok/i }
   end
 
-  describe bash("sudo bash -c 'unset MODULEPATH && source /etc/profile.d/modules.sh && module load armpl && cd #{armpl_install_dir}/examples &&  \
+  describe bash("sudo bash -c 'unset MODULEPATH && source /etc/profile.d/modules.sh && module load armpl && cd #{armpl_install_dir}/examples_lp64 &&  \
     gcc -c -I#{armpl_install_dir}/include #{test_software}.c -o #{test_software}.o && \
     gcc #{test_software}.o -L#{armpl_install_dir}/lib -o #{test_software}.exe -larmpl_lp64 -lm && \
     ./#{test_software}.exe'") do

@@ -9,7 +9,7 @@
 set -e
 
 if
-  [ -z "${DEVICE_NAME}" ] ||          # name of the device
+#  [ -z "${DEVICE_NAME}" ] ||          # name of the device
   [ -z "${DEVICE_NUMBER}" ] ||        # index of the device
   [ -z "${NETWORK_CARD_INDEX}" ] ||   # index of the network card
   [ -z "${GW_IP_ADDRESS}" ] ||        # gateway ip address

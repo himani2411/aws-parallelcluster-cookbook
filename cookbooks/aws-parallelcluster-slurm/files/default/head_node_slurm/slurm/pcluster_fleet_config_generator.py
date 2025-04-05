@@ -89,7 +89,7 @@ def generate_fleet_config_file(output_file: str, input_file: str):
                 else None
             )
             queue_single_az = queue_config["Networking"].get("EnableSingleAvailabilityZone") if queue_config.get("Networking") else None
-
+            log.info("queue config contains %s ", queue_config)
             fleet_config[queue_name] = {}
 
             for compute_resource_config in queue_config["ComputeResources"]:
@@ -160,7 +160,7 @@ def _generate_compute_resource_fleet_config(
                 networking = {"SubnetIds": queue_subnets, "EnableSingleAvailabilityZone": queue_single_az}
             else:
                 networking = {"SubnetIds": queue_subnets}
-
+            log.info("Networking contains %s", networking)
             config_for_fleet.update(
                 {
                     "Api": "create-fleet",

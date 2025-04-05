@@ -88,6 +88,7 @@ def generate_fleet_config_file(output_file: str, input_file: str):
                 if queue_capacity_reservation_target
                 else None
             )
+            queue_single_az = queue_config["Networking"].get("EnableSingleAvailabilityZone") if queue_config.get("Networking") else None
 
             fleet_config[queue_name] = {}
 
@@ -99,6 +100,7 @@ def generate_fleet_config_file(output_file: str, input_file: str):
                     queue_capacity_reservation=queue_capacity_reservation,
                     queue_capacity_type=queue_capacity_type,
                     queue_subnets=queue_config["Networking"]["SubnetIds"],
+                    queue_single_az=queue_single_az,
                 )
                 fleet_config[queue_name][compute_resource_name] = config_for_fleet
 
@@ -125,6 +127,7 @@ def _generate_compute_resource_fleet_config(
     queue_capacity_reservation: str,
     queue_capacity_type: str,
     queue_subnets: List,
+    queue_single_az: bool,
 ):
     """
     Generate compute resource config to add in the fleet-config.json, overriding values from the queue.
@@ -152,11 +155,17 @@ def _generate_compute_resource_fleet_config(
 
         if compute_resource_config.get("Instances"):
             # multiple instance types, create-fleet api
+
+            if queue_single_az:
+                networking = {"SubnetIds": queue_subnets, "EnableSingleAvailabilityZone": queue_single_az}
+            else:
+                networking = {"SubnetIds": queue_subnets}
+
             config_for_fleet.update(
                 {
                     "Api": "create-fleet",
                     "Instances": copy.deepcopy(compute_resource_config["Instances"]),
-                    "Networking": {"SubnetIds": queue_subnets},
+                    "Networking": networking,
                 }
             )
             allocation_strategy = compute_resource_config.get("AllocationStrategy", queue_allocation_strategy)

@@ -98,6 +98,25 @@ from pcluster_fleet_config_generator import ConfigurationFieldNotFoundError, Cri
             None,
         ),
         (
+                {
+                    "Scheduling": {
+                        "SlurmQueues": [
+                            {
+                                "Name": "q1",
+                                "CapacityType": "ONDEMAND",
+                                "ComputeResources": [
+                                    {"Name": "cr1", "Instances": [{"InstanceType": "test"}]},
+                                    {"Name": "cr2", "InstanceType": "test"},
+                                ],
+                                "Networking": {"SubnetIds": ["123"], "EnableSingleAvailabilityZone": True},
+                            }
+                        ]
+                    }
+                },
+                None,
+                None,
+        ),
+        (
             {
                 "Scheduling": {
                     "SlurmQueues": [
@@ -131,13 +150,36 @@ from pcluster_fleet_config_generator import ConfigurationFieldNotFoundError, Cri
                                 },
                                 {"Name": "cr2", "InstanceType": "test", "SpotPrice": "10"},
                             ],
-                            "Networking": {"SubnetIds": ["123", "456", "789"]},
+                            "Networking": {"SubnetIds": ["123", "456", "789"], "EnableSingleAvailabilityZone": True},
                         }
                     ]
                 }
             },
             None,
             None,
+        ),
+        (
+                {
+                    "Scheduling": {
+                        "SlurmQueues": [
+                            {
+                                "Name": "q1",
+                                "CapacityType": "SPOT",
+                                "ComputeResources": [
+                                    {
+                                        "Name": "cr1",
+                                        "Instances": [{"InstanceType": "test"}, {"InstanceType": "test-2"}],
+                                        "SpotPrice": "10",
+                                    },
+                                    {"Name": "cr2", "InstanceType": "test", "SpotPrice": "10"},
+                                ],
+                                "Networking": {"SubnetIds": ["123", "456", "789"], },
+                            }
+                        ]
+                    }
+                },
+                None,
+                None,
         ),
         (
             {

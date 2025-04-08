@@ -15,6 +15,9 @@ include_recipe "aws-parallelcluster-platform::sudo_install"
 include_recipe "aws-parallelcluster-platform::users"
 include_recipe "aws-parallelcluster-platform::disable_services"
 package_repos 'setup the repositories'
+kernel_pinning 'Pin Kernel packages' do
+  action :kernel_lock
+end
 include_recipe "aws-parallelcluster-platform::directories"
 install_packages 'Install OS and extra packages'
 include_recipe "aws-parallelcluster-platform::cookbook_virtualenv"

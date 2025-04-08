@@ -28,5 +28,8 @@ include_recipe 'aws-parallelcluster-awsbatch::install'
 # DCV recipe installs Gnome, X and their dependencies so it must be installed as latest to not break the environment
 # used to build the schedulers packages
 dcv "Install DCV"
+kernel_pinning 'Unpin Kernel packages' do
+  action :kernel_unlock
+end
 
 node_attributes "dump node attributes"

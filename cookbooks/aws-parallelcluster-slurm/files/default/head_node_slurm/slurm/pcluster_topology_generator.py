@@ -126,7 +126,7 @@ def main():
             help="Yaml file containing pcluster CLI configuration file with default values",
             required=True,
         )
-        parser.add_argument("--block-size", help="Block Size of topology.conf", required=True)
+        parser.add_argument("--block-sizes", help="Block Size of topology.conf", required=True)
         args = parser.parse_args()
         generate_topology_config_file(args.output_file, args.input_file, args.block_sizes)
     except Exception as e:

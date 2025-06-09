@@ -25,3 +25,5 @@ default['cluster']['slurm']['spank_config_dir'] = "#{node['cluster']['slurm']['i
 # Pyxis
 default['cluster']['pyxis']['version'] = '0.20.0'
 default['cluster']['pyxis']['runtime_path'] = '/run/pyxis'
+
+default['cluster']['topology_block_size'] = 2 #TODO: Temp set of blockSize during testing

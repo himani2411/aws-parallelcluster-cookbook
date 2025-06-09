@@ -65,9 +65,9 @@ def generate_topology_config_file(output_file: str, input_file: str, block_sizes
 
             # Retrieve capacity info from the queue_name, if there
             queue_capacity_type = CAPACITY_TYPE_MAP.get(queue_config.get("CapacityType", "ONDEMAND"))
-            if queue_capacity_type != CAPACITY_TYPE_MAP.get("CAPACITY_BLOCK"):
-                log.info("ParallelCluster does not create topology for %s", queue_capacity_type)
-                continue
+            # if queue_capacity_type != CAPACITY_TYPE_MAP.get("CAPACITY_BLOCK"):
+            #     log.info("ParallelCluster does not create topology for %s", queue_capacity_type)
+            #     continue
 
             queue_capacity_reservation_target = queue_config.get("CapacityReservationTarget", {})
             queue_capacity_reservation = (
@@ -80,10 +80,10 @@ def generate_topology_config_file(output_file: str, input_file: str, block_sizes
                 compute_resource_name = compute_resource_config["Name"]
                 compute_min_count = compute_resource_config["MinCount"]
                 compute_max_count = compute_resource_config["MaxCount"]
-                if compute_min_count == compute_max_count:
-                    node_type = "st"
-                else:
-                    continue
+                # if compute_min_count == compute_max_count:
+                node_type = "dy"
+                # else:
+                #     continue
 
                 capacity_reservation_target = compute_resource_config.get("CapacityReservationTarget", {})
                 capacity_reservation = (

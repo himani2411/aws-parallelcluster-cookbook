@@ -80,10 +80,10 @@ def generate_topology_config_file(output_file: str, input_file: str, block_sizes
                 compute_resource_name = compute_resource_config["Name"]
                 compute_min_count = compute_resource_config["MinCount"]
                 compute_max_count = compute_resource_config["MaxCount"]
-                # if compute_min_count == compute_max_count:
-                node_type = "dy"
-                # else:
-                #     continue
+                if compute_min_count == compute_max_count:
+                    node_type = "st"
+                else:
+                    continue
 
                 capacity_reservation_target = compute_resource_config.get("CapacityReservationTarget", {})
                 capacity_reservation = (

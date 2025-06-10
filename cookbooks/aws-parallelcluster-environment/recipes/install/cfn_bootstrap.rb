@@ -42,11 +42,11 @@ bucket = "s3.amazonaws.com"
 if region.start_with?('cn-')
   bucket = 's3.cn-north-1.amazonaws.com.cn/cn-north-1-aws-parallelcluster'
 elsif region.start_with?("us-iso")
-  bucket = "s3.#{aws_region}.#{aws_domain}"
+  bucket = "aws-parallelcluster-test-dependencies.s3.#{aws_region}.#{aws_domain}"
 end
 
 remote_file "/tmp/#{cfnbootstrap_package}" do
-  source "https://#{bucket}/cloudformation-examples/#{cfnbootstrap_package}"
+  source "https://#{bucket}/#{cfnbootstrap_package}"
   retries 3
   retry_delay 5
 end

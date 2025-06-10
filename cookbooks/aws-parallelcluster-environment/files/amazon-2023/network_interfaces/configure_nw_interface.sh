@@ -3,10 +3,10 @@
 set -ex
 
 if
-  [ -z "${DEVICE_NAME}" ] ||          # name of the device
+#  [ -z "${DEVICE_NAME}" ] ||          # name of the device
   [ -z "${DEVICE_NUMBER}" ] ||       # index of the device
   [ -z "${NETWORK_CARD_INDEX}" ] ||   # index of the network card
-  [ -z "${DEVICE_IP_ADDRESS}" ] ||       # ip of the device
+#  [ -z "${DEVICE_IP_ADDRESS}" ] ||       # ip of the device
   [ -z "${MAC}" ] ||                 # mac address of the device
   [ -z "${CIDR_BLOCK}" ]                 # CIDR block of the subnet
 then

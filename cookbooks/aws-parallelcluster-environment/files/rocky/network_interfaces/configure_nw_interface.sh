@@ -12,11 +12,11 @@
 set -e
 
 if
-  [ -z "${DEVICE_NAME}" ] ||          # name of the device
+#  [ -z "${DEVICE_NAME}" ] ||          # name of the device
   [ -z "${DEVICE_NUMBER}" ] ||        # index of the device
   [ -z "${NETWORK_CARD_INDEX}" ] ||   # index of the network card
   [ -z "${GW_IP_ADDRESS}" ] ||        # gateway ip address
-  [ -z "${DEVICE_IP_ADDRESS}" ] ||    # ip address to assign to the interface
+#  [ -z "${DEVICE_IP_ADDRESS}" ] ||    # ip address to assign to the interface
   [ -z "${CIDR_PREFIX_LENGTH}" ]      # the prefix length of the device IP cidr block
 then
   echo 'One or more environment variables missing'

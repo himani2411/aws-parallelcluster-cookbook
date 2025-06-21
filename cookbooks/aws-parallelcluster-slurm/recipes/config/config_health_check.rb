@@ -87,36 +87,25 @@ directory "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin
   mode '0755'
 end
 
-# cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/health_checks/gpu_health_check.sh" do
-#   source 'config_slurm/scripts/health_checks/gpu_health_check.sh'
-#   owner 'root'
-#   group 'root'
-#   mode '0755'
-# end
-
-# template "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/prolog.d/90_pcluster_health_check_manager" do
-#   source 'slurm/head_node/health_check/90_pcluster_health_check_manager.erb'
-#   owner 'root'
-#   group 'root'
-#   mode '0755'
-#   variables(
-#     node_spec_file: "#{node['cluster']['slurm_plugin_dir']}/slurm_node_spec.json"
-#   )
-# end
-
-# link "#{node['cluster']['slurm']['install_dir']}/etc/scripts/prolog.d/90_pcluster_health_check_manager" do
-#   to "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/prolog.d/90_pcluster_health_check_manager"
-# end
-
-cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/health_checks/nvidia-pro.sh" do
-  source 'config_slurm/scripts/health_checks/nvidia/nvidia-pro.sh'
+cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/health_checks/gpu_health_check.sh" do
+  source 'config_slurm/scripts/health_checks/gpu_health_check.sh'
   owner 'root'
   group 'root'
   mode '0755'
 end
 
-link "#{node['cluster']['slurm']['install_dir']}/etc/scripts/prolog.d/nvidia-pro.sh" do
-  to "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/health_checks/nvidia-pro.sh"
+template "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/prolog.d/90_pcluster_health_check_manager" do
+  source 'slurm/head_node/health_check/90_pcluster_health_check_manager.erb'
+  owner 'root'
+  group 'root'
+  mode '0755'
+  variables(
+    node_spec_file: "#{node['cluster']['slurm_plugin_dir']}/slurm_node_spec.json"
+  )
+end
+
+link "#{node['cluster']['slurm']['install_dir']}/etc/scripts/prolog.d/90_pcluster_health_check_manager" do
+  to "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/prolog.d/90_pcluster_health_check_manager"
 end
 
 cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/epilog.d/90_pcluster_noop" do
@@ -128,15 +117,4 @@ end
 
 link "#{node['cluster']['slurm']['install_dir']}/etc/scripts/epilog.d/90_pcluster_noop" do
   to "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/epilog.d/90_pcluster_noop"
-end
-
-cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/epilog.d/nvidia-epi.sh" do
-  source 'config_slurm/scripts/epilog.d/nvidia/nvidia-epi.sh'
-  owner 'root'
-  group 'root'
-  mode '0755'
-end
-
-link "#{node['cluster']['slurm']['install_dir']}/etc/scripts/epilog.d/nvidia-epi.sh" do
-  to "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/epilog.d/nvidia-epi.sh"
 end

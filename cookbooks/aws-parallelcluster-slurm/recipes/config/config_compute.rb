@@ -36,6 +36,13 @@ if graphic_instance? && nvidia_installed?
   execute "run_nvidiasmi" do
     command 'nvidia-smi'
   end
+
+  cookbook_file "/etc/nvidia-imex/nvidia-config.cfg" do
+    source 'config_slurm/nvidia-config.cfg'
+    owner 'root'
+    group 'root'
+    mode '0755'
+  end
 end
 
 include_recipe 'aws-parallelcluster-slurm::config_slurmd_systemd_service'

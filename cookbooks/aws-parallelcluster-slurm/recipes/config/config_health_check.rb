@@ -94,6 +94,13 @@ cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_pl
   mode '0755'
 end
 
+cookbook_file "#{node['cluster']['slurm']['install_dir']}/etc/scripts/headnode_prolog.sh" do
+  source 'config_slurm/scripts/headnode_prolog.sh'
+  owner 'root'
+  group 'root'
+  mode '0755'
+end
+
 template "#{node['cluster']['slurm']['install_dir']}/etc/pcluster/.slurm_plugin/scripts/prolog.d/90_pcluster_health_check_manager" do
   source 'slurm/head_node/health_check/90_pcluster_health_check_manager.erb'
   owner 'root'

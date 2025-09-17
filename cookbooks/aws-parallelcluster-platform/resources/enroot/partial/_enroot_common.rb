@@ -16,7 +16,7 @@ unified_mode true
 default_action :setup
 
 action :setup do
-  return if on_docker? || enroot_installed
+  return if on_docker? || enroot_installed || !enroot_enabled?
 
   action_install_package
 
@@ -38,4 +38,8 @@ end
 
 def enroot_installed
   ::File.exist?('/usr/bin/enroot')
+end
+
+def enroot_enabled?
+  ['true', 'yes', true].include?(node['cluster']['enroot']['enabled'])
 end

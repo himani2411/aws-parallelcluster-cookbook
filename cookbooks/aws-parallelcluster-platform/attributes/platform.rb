@@ -13,6 +13,7 @@ default['conditions']['arm_pl_supported'] = arm_instance?
 default['cluster']['enroot']['version'] = '3.4.1'
 default['cluster']['enroot']['temporary_dir'] = '/run/enroot'
 default['cluster']['enroot']['persistent_dir'] = '/var/enroot'
+default['cluster']['enroot']['enabled'] = 'yes'
 
 # NVidia
 default['cluster']['nvidia']['enabled'] = 'no'

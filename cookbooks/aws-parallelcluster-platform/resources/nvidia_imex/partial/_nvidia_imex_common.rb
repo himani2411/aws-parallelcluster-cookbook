@@ -40,6 +40,7 @@ action :configure do
       group 'root'
       mode '0755'
       action :create_if_missing
+      only_if { Dir.exist?(node['cluster']['nvidia']['imex']['shared_dir']) }
     end
 
     template nvidia_imex_main_conf_file do
@@ -49,6 +50,7 @@ action :configure do
       mode '0755'
       action :create_if_missing
       variables(imex_nodes_config_file_path: nvidia_imex_nodes_conf_file)
+      only_if { Dir.exist?(node['cluster']['nvidia']['imex']['shared_dir']) }
     end
 
     template "/etc/systemd/system/#{nvidia_imex_service}.service" do
@@ -58,11 +60,13 @@ action :configure do
       mode '0644'
       action :create
       variables(imex_main_config_file_path: nvidia_imex_main_conf_file)
+      only_if { Dir.exist?(node['cluster']['nvidia']['imex']['shared_dir']) }
     end
 
     service nvidia_imex_service do
       action %i(enable start)
       supports status: true
+      only_if { ::File.exist?("/etc/systemd/system/#{nvidia_imex_service}.service") }
     end
   end
 end

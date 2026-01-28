@@ -20,7 +20,7 @@ action :install_package do
                        end
   packages_urls_list.each do |package|
     remote_file "#{node['cluster']['sources_dir']}/#{package}-#{package_version}.deb" do
-      source "#{node['cluster']['nvidia']['dcgm_base_url']}/#{platform}/#{package}_#{package_version}_#{arch_suffix}.deb"
+      source "#{node['cluster']['nvidia']['dcgm_base_url']}/#{platform}/#{url_prefix}/#{package}_#{package_version}_#{arch_suffix}.deb"
       mode '0644'
       retries 3
       retry_delay 5
@@ -54,6 +54,10 @@ end
 
 def arch_suffix
   arm_instance? ? 'arm64' : 'amd64'
+end
+
+def url_prefix
+  arm_instance? ? 'sbsa' : 'x86_64'
 end
 
 def package_version

@@ -47,7 +47,7 @@ action_class do
   end
 
   def package_archive
-    "#{node['cluster']['mysql']['base_url']}#{package_filename}"
+    "#{node['cluster']['mysql']['base_url']}/#{package_filename}"
   end
 
   def package_source

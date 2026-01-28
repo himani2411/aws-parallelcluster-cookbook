@@ -22,15 +22,15 @@ action :create_source_link do
   end
 
   # Add MySQL source file to be compliant with Licensing
-  file "#{node['cluster']['sources_dir']}/mysql_source_code.txt" do
-    content %(You can get MySQL source code here:
-
-#{package_source}
-)
-    owner 'root'
-    group 'root'
-    mode '0644'
-  end
+#   file "#{node['cluster']['sources_dir']}/mysql_source_code.txt" do
+#     content %(You can get MySQL source code here:
+#
+# #{package_source}
+# )
+#     owner 'root'
+#     group 'root'
+#     mode '0644'
+#   end
 end
 
 action_class do
@@ -47,7 +47,7 @@ action_class do
   end
 
   def package_archive
-    "#{node['cluster']['mysql']['base_url']}/#{package_platform}/#{package_filename}"
+    "#{node['cluster']['mysql']['base_url']}#{package_filename}"
   end
 
   def package_source

@@ -17,6 +17,10 @@ if platform?('amazon') && node['platform_version'] == "2"
 end
 default['cluster']['jwt']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/jwt"
 ## MySql
-default['cluster']['mysql']['version'] = "#{node['cluster']['mysql']['version']}-1"
+
 default['cluster']['mysql']['source_version'] = '8.4.8'
+if platform?('amazon') && node['platform_version'] == "2"
+  default['cluster']['mysql']['source_version'] = '8.0.39'
+end
+default['cluster']['mysql']['version'] = "#{node['cluster']['mysql']['version']}-1"
 default['cluster']['mysql']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/mysql"

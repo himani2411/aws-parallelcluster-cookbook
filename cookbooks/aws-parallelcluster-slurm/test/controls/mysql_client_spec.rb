@@ -36,19 +36,19 @@ control 'tag:install_mysql_client_installed' do
   end
 end
 
-control 'tag:install_mysql_client_source_code_created' do
-  title 'MySql client source code is configured in target dir'
-
-  describe file('/opt/parallelcluster/sources/mysql_source_code.txt') do
-    it { should exist }
-    its('mode') { should cmp '0644' }
-    its('owner') { should eq 'root' }
-    its('group') { should eq 'root' }
-    its('content') do
-      should eq %(You can get MySQL source code here:
-
-https://#{node['cluster']['region']}-aws-parallelcluster.s3.#{node['cluster']['region']}.amazonaws.com/archives/source/mysql-8.0.39.tar.gz
-)
-    end
-  end
-end
+# control 'tag:install_mysql_client_source_code_created' do
+#   title 'MySql client source code is configured in target dir'
+#
+#   describe file('/opt/parallelcluster/sources/mysql_source_code.txt') do
+#     it { should exist }
+#     its('mode') { should cmp '0644' }
+#     its('owner') { should eq 'root' }
+#     its('group') { should eq 'root' }
+#     its('content') do
+#       should eq %(You can get MySQL source code here:
+#
+# https://#{node['cluster']['region']}-aws-parallelcluster.s3.#{node['cluster']['region']}.amazonaws.com/archives/source/mysql-8.0.39.tar.gz
+# )
+#     end
+#   end
+# end

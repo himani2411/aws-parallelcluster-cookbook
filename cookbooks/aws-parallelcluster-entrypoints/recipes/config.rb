@@ -16,6 +16,9 @@ include_recipe "aws-parallelcluster-platform::enable_chef_error_handler"
 
 include_recipe "aws-parallelcluster-shared::setup_envars"
 
+# TEST: Diagnose FSx routing after init phase
+include_recipe "aws-parallelcluster-environment::test_fsx_routing"
+
 include_recipe 'aws-parallelcluster-platform::config'
 include_recipe "aws-parallelcluster-environment::config"
 

@@ -5,12 +5,10 @@
 
 return if on_docker?
 
-fsx_dns_names = node['cluster']['fsx_dns_names']
-return if fsx_dns_names.nil? || fsx_dns_names.empty?
+fsx_fs_ids = node['cluster']['fsx_fs_ids']
+return if fsx_fs_ids.nil? || fsx_fs_ids.empty?
 
-fsx_dns = fsx_dns_names.split(',').first
-
-log "Running FSx routing diagnostic test for #{fsx_dns}" do
+log "Running FSx routing diagnostic test for #{fsx_fs_ids}" do
   level :info
 end
 
@@ -24,7 +22,12 @@ bash 'test_fsx_routing_after_init' do
     echo "=== FSx Routing Test (Start of Config Phase) ===" | tee -a $LOG
     date | tee -a $LOG
 
-    FSX_DNS="#{fsx_dns}"
+    TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    REGION=$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/placement/region)
+
+    FSX_FS_ID="#{fsx_fs_ids.split(',').first}"
+    FSX_DNS="${FSX_FS_ID}.fsx.${REGION}.amazonaws.com"
+    echo "FSx FS ID: ${FSX_FS_ID}" | tee -a $LOG
     echo "FSx DNS: ${FSX_DNS}" | tee -a $LOG
 
     FSX_IP=$(dig +short ${FSX_DNS} | head -1)

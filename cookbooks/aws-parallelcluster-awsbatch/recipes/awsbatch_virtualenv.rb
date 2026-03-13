@@ -31,7 +31,7 @@ end
 dependency_package_name = "pypi-awsbatch-dependencies-#{node['cluster']['python-major-minor-version']}-#{node['kernel']['machine']}"
 
 remote_file "#{node['cluster']['base_dir']}/awsbatch-dependencies.tgz" do
-  source "https://aws-parallelcluster-dev-build-dependencies.s3.us-east-1.amazonaws.com/archives/dependencies/PyPi/#{node['kernel']['machine']}/#{dependency_package_name}.tgz"
+  source "s3://aws-parallelcluster-dev-build-dependencies/archives/dependencies/PyPi/#{node['kernel']['machine']}/#{dependency_package_name}.tgz"
   mode '0644'
   retries 3
   retry_delay 5

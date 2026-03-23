@@ -18,7 +18,17 @@ default['cluster']['enroot']['persistent_dir'] = '/var/enroot'
 default['cluster']['nvidia']['enabled'] = 'no'
 default['cluster']['nvidia']['driver_version'] = '580.105.08'
 default['cluster']['nvidia']['dcgm_version'] = '4.5.1-1'
+
+default['cluster']['nvidia']['driver_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_driver"
 default['cluster']['nvidia']['dcgm_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_dcgm"
+
+# CUDA
+default['cluster']['nvidia']['cuda']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda"
+default['cluster']['nvidia']['cuda']['samples_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda/samples"
+default['cluster']['nvidia']['cuda']['version'] = '13.0.2'
+if platform?('amazon') && node['platform_version'] == "2"
+  default['cluster']['nvidia']['cuda']['version'] = '12.4.1'
+end
 
 # GDRCopy
 default['cluster']['nvidia']['gdrcopy']['version'] = '2.5.2'
@@ -30,6 +40,7 @@ default['cluster']['nvidia']['imex']['force_configuration'] = false
 
 # NVIDIA NVLSM
 default['cluster']['nvidia']['nvlsm']['enabled'] = true
+default['cluster']['nvidia']['nvlsm']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_nvlsm"
 
 # DCV
 default['cluster']['dcv']['install_enabled'] = true

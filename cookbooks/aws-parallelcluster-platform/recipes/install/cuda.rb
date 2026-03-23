@@ -19,14 +19,21 @@ return unless nvidia_enabled?
 
 # Cuda installer from https://developer.nvidia.com/cuda-toolkit-archive
 # Cuda installer naming: cuda_11.8.0_520.61.05_linux
-cuda_version = '13.0'
-cuda_patch = '2'
-cuda_complete_version = "#{cuda_version}.#{cuda_patch}"
-cuda_version_suffix = '580.95.05'
-cuda_samples_version = '13.0'
+
+# Version suffix (driver version) mapping for each cuda version
+cuda_version_suffix_map = {
+  '13.0.2' => '580.95.05',
+  '12.4.1' => '550.54.15',
+}
+
+cuda_full_version = node['cluster']['nvidia']['cuda']['version']
+cuda_parts = cuda_full_version.split('.')
+cuda_version = "#{cuda_parts[0]}.#{cuda_parts[1]}"
+cuda_version_suffix = cuda_version_suffix_map[cuda_full_version] || ''
+cuda_samples_version = cuda_version
 cuda_arch = arm_instance? ? 'linux_sbsa' : 'linux'
-cuda_url = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda/cuda_#{cuda_complete_version}_#{cuda_version_suffix}_#{cuda_arch}.run"
-cuda_samples_url = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda/samples/v#{cuda_samples_version}.tar.gz"
+cuda_url = "#{node['cluster']['nvidia']['cuda']['base_url']}/cuda_#{cuda_full_version}_#{cuda_version_suffix}_#{cuda_arch}.run"
+cuda_samples_url = "#{node['cluster']['nvidia']['cuda']['samples_base_url']}/v#{cuda_samples_version}.tar.gz"
 tmp_cuda_run = '/tmp/cuda.run'
 tmp_cuda_sample_archive = '/tmp/cuda-sample.tar.gz'
 

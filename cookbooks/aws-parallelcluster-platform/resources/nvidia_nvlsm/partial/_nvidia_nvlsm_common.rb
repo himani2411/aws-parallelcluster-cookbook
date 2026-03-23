@@ -74,7 +74,7 @@ def nvidia_nvlsm_version
 end
 
 def nvidia_nvlsm_url
-  "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_nvlsm/#{platform}/#{nvidia_nvlsm_package_full_name}"
+  "#{node['cluster']['nvidia']['nvlsm']['base_url']}/#{platform}/#{nvidia_nvlsm_package_full_name}"
 end
 
 def nvidia_nvlsm_package_full_name

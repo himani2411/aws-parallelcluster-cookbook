@@ -75,6 +75,7 @@ default['cluster']['efa']['sha256'] = '2df4201e046833c7dc8160907bee7f52b76ff80ed
 
 default['cluster']['efs']['version'] = '2.4.2'
 default['cluster']['efs']['sha256'] = '0b1249279ec642b981bb775614790d2d206297cf96ade22241fa0b8b13cafb98'
+default['cluster']['efs']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/efs"
 
 default['cluster']['cfn_bootstrap']['version'] = '2.0-38'
 

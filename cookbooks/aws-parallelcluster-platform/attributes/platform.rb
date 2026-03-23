@@ -26,8 +26,10 @@ default['cluster']['nvidia']['dcgm_base_url'] = "#{node['cluster']['artifacts_s3
 default['cluster']['nvidia']['cuda']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda"
 default['cluster']['nvidia']['cuda']['samples_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/cuda/samples"
 default['cluster']['nvidia']['cuda']['version'] = '13.0.2'
+default['cluster']['nvidia']['cuda']['driver_version_suffix'] = '580.95.05'
 if platform?('amazon') && node['platform_version'] == "2"
   default['cluster']['nvidia']['cuda']['version'] = '12.4.1'
+  default['cluster']['nvidia']['cuda']['driver_version_suffix'] = '550.54.15'
 end
 
 # GDRCopy

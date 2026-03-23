@@ -20,16 +20,10 @@ return unless nvidia_enabled?
 # Cuda installer from https://developer.nvidia.com/cuda-toolkit-archive
 # Cuda installer naming: cuda_11.8.0_520.61.05_linux
 
-# Version suffix (driver version) mapping for each cuda version
-cuda_version_suffix_map = {
-  '13.0.2' => '580.95.05',
-  '12.4.1' => '550.54.15',
-}
-
 cuda_full_version = node['cluster']['nvidia']['cuda']['version']
 cuda_parts = cuda_full_version.split('.')
 cuda_version = "#{cuda_parts[0]}.#{cuda_parts[1]}"
-cuda_version_suffix = cuda_version_suffix_map[cuda_full_version] || ''
+cuda_version_suffix = node['cluster']['nvidia']['cuda']['driver_version_suffix']
 cuda_samples_version = cuda_version
 cuda_arch = arm_instance? ? 'linux_sbsa' : 'linux'
 cuda_url = "#{node['cluster']['nvidia']['cuda']['base_url']}/cuda_#{cuda_full_version}_#{cuda_version_suffix}_#{cuda_arch}.run"

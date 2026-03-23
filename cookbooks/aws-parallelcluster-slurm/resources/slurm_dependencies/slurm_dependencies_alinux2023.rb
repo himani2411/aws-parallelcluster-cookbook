@@ -14,8 +14,8 @@ end
 
 use 'partial/_slurm_dependencies_common'
 
-http_parser_version = "2.9.4"
-http_parser_url = "#{node['cluster']['artifacts_s3_url']}/dependencies/http_parser/v#{http_parser_version}.tar.gz"
+http_parser_version = node['cluster']['http_parser']['version']
+http_parser_url = "#{node['cluster']['http_parser']['base_url']}/v#{http_parser_version}.tar.gz"
 http_parser_tarball = "#{node['cluster']['sources_dir']}/http-parser-#{http_parser_version}.tar.gz"
 
 def dependencies

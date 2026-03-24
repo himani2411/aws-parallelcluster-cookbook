@@ -44,9 +44,10 @@ action :install_nvlsm_dependencies do
 end
 
 action :install_nvlsm do
+  base_url = node['cluster']['nvidia']['nvlsm']['base_url']
   remote_file "#{node['cluster']['sources_dir']}/#{nvidia_nvlsm_package_full_name}" do
     source nvidia_nvlsm_url
-    checksum nvidia_nvlsm_checksum
+    checksum nvidia_nvlsm_checksum if default_artifacts_url?(base_url)
     mode '0644'
     retries 3
     retry_delay 5
@@ -70,7 +71,7 @@ def nvidia_nvlsm_package
 end
 
 def nvidia_nvlsm_version
-  "2025.03.9-1"
+  node['cluster']['nvidia']['nvlsm']['version']
 end
 
 def nvidia_nvlsm_url

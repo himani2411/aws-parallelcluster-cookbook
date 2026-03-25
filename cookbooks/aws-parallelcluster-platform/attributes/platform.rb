@@ -41,6 +41,7 @@ default['cluster']['nvidia']['gdrcopy']['base_url'] = "#{node['cluster']['artifa
 
 # nvidia-imex
 default['cluster']['nvidia']['imex']['force_configuration'] = false
+default['cluster']['nvidia']['imex']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_imex"
 
 # NVIDIA NVLSM
 default['cluster']['nvidia']['nvlsm']['enabled'] = true

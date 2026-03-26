@@ -89,7 +89,7 @@ ruby_block 'detect and configure proxy' do
       # and instead goes through the proxy which has internet access. The proxy allowlist in
       # proxy_stack.yaml must include s3.amazonaws.com for this to work.
       # IMDS (169.254.169.254) and ECS task metadata (169.254.170.2) are also excluded.
-      no_proxy = "localhost,127.0.0.1,169.254.169.254,169.254.170.2,.s3.#{region}.amazonaws.com,s3.#{region}.amazonaws.com"
+      no_proxy = "localhost,127.0.0.1,169.254.169.254,169.254.170.2,.s3.#{region}.amazonaws.com,s3.#{region}.amazonaws.com,.s3.amazonaws.com"
 
       Chef::Log.info("Proxy detected at #{proxy_url}, configuring environment variables")
 

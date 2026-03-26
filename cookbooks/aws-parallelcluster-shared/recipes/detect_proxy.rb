@@ -80,8 +80,16 @@ ruby_block 'detect and configure proxy' do
       # Step 3: Build the no_proxy list
       # S3 endpoints are excluded so cookbook/dependency downloads from S3 go through
       # the S3 VPC Gateway Endpoint directly, not through the proxy.
+      # Both regional (s3.{region}.amazonaws.com) and global (s3.amazonaws.com) endpoints
+      # are included because some resources use the global endpoint (e.g., cloudformation-examples
+      # bucket uses https://s3.amazonaws.com/cloudformation-examples/...).
+      # This is handled here in the cookbook (via no_proxy) rather than in the proxy_stack.yaml
+      # allowlist because the S3 VPC Gateway Endpoint routes S3 traffic at the network level —
+      # the traffic should never reach the proxy at all. If it does reach the proxy (because
+      # the client uses the proxy explicitly), no_proxy ensures it bypasses the proxy and
+      # goes directly to S3 via the VPC endpoint.
       # IMDS (169.254.169.254) and ECS task metadata (169.254.170.2) are also excluded.
-      no_proxy = "localhost,127.0.0.1,169.254.169.254,169.254.170.2,.s3.#{region}.amazonaws.com,s3.#{region}.amazonaws.com"
+      no_proxy = "localhost,127.0.0.1,169.254.169.254,169.254.170.2,.s3.#{region}.amazonaws.com,s3.#{region}.amazonaws.com,.s3.amazonaws.com,s3.amazonaws.com"
 
       Chef::Log.info("Proxy detected at #{proxy_url}, configuring environment variables")
 

@@ -4,9 +4,9 @@ control 'tag:install_efs_utils_installed' do
 
   only_if { !os_properties.redhat_on_docker? }
 
-  describe file("#{node['cluster']['sources_dir']}/efs-utils-2.4.2.tar.gz") do
+  describe file("#{node['cluster']['sources_dir']}/efs-utils-#{node['cluster']['efs']['version']}.tar.gz") do
     it { should exist }
-    its('sha256sum') { should eq '0b1249279ec642b981bb775614790d2d206297cf96ade22241fa0b8b13cafb98' }
+    its('sha256sum') { should eq node['cluster']['efs']['sha256'] }
     its('owner') { should eq 'root' }
     its('group') { should eq 'root' }
     its('mode') { should cmp '0644' }

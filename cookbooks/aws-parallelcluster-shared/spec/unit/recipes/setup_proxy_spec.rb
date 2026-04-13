@@ -45,9 +45,13 @@ describe 'aws-parallelcluster-shared::setup_proxy' do
           expect(ENV['no_proxy']).to include("s3.#{TEST_REGION}.#{TEST_AWS_DOMAIN}")
           expect(ENV['no_proxy']).to include(".s3-#{TEST_REGION}.#{TEST_AWS_DOMAIN}")
           expect(ENV['no_proxy']).to include("s3-#{TEST_REGION}.#{TEST_AWS_DOMAIN}")
-          expect(ENV['no_proxy']).to include(".s3.#{TEST_AWS_DOMAIN}")
           expect(ENV['no_proxy']).to include(".s3.dualstack.#{TEST_REGION}.#{TEST_AWS_DOMAIN}")
           expect(ENV['no_proxy']).to include("s3.dualstack.#{TEST_REGION}.#{TEST_AWS_DOMAIN}")
+          # Global S3 (.s3.amazonaws.com) is intentionally NOT in no_proxy — it goes through
+          # the proxy because the VPC Gateway Endpoint in GovCloud cannot serve global S3
+          # virtual-hosted URLs (e.g., fsx-lustre-client-repo.s3.amazonaws.com).
+          no_proxy_entries = ENV['no_proxy'].split(",")
+          expect(no_proxy_entries).not_to include(".s3.#{TEST_AWS_DOMAIN}")
         end
 
         # snapd proxy configuration tests

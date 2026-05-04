@@ -135,7 +135,7 @@ action_class do
       action %i(disable stop)
     end
 
-    include_recipe 'aws-parallelcluster-platform::disable_selinux'
+    include_recipe 'aws-parallelcluster-platform::configure_selinux'
   end
 
   def install_dcv_gl

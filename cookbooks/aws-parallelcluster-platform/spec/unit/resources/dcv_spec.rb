@@ -582,8 +582,8 @@ describe 'dcv:setup' do
             # stop firewall
             is_expected.to disable_service('firewalld').with_action(%i(disable stop))
 
-            # Disable selinux
-            is_expected.to disabled_selinux_state('SELinux Disabled')
+            # Configure selinux (permissive mode by default)
+            is_expected.to permissive_selinux_state('SELinux Permissive')
           end
         end
 

@@ -41,5 +41,11 @@ default['cluster']['node_type'] = nil
 
 default['cluster']["directory_service"]["enabled"] = 'false'
 
+# SELinux / Security Access Control mode: disabled | permissive (default) | enforcing
+# permissive: logs violations but does not block — recommended for HPC environments
+# disabled: fully disables SELinux via config + kernel cmdline (grubby)
+# enforcing: leaves OS default — customer must manage their own SELinux policies
+default['cluster']['security_access_control_mode'] = 'permissive'
+
 # Default NFS mount options
 default['cluster']['nfs']['hard_mount_options'] = 'hard,_netdev,noatime'

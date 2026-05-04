@@ -23,7 +23,7 @@ unless alinux2023_on_docker? # Running this recipe on Alinux 2023 docker generat
   # Example failure https://github.com/aws/aws-parallelcluster-cookbook/actions/runs/9373643185/job/25807894209?pr=2692
   include_recipe "openssh"
 end
-include_recipe "aws-parallelcluster-platform::disable_selinux"
+include_recipe "aws-parallelcluster-platform::configure_selinux"
 include_recipe "aws-parallelcluster-platform::license_readme"
 include_recipe "aws-parallelcluster-platform::gc_thresh_values"
 include_recipe "aws-parallelcluster-platform::supervisord_install"

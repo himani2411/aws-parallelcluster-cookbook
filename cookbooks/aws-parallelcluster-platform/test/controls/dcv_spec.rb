@@ -128,7 +128,7 @@ control 'tag:install_dcv_rhel_and_centos_specific_setup' do
     its('exit_status') { should eq 0 }
   end
 
-  # As in the disable_selinux_spec we would need to skip testing that selinux is disabled
+  # As in the configure_selinux_spec we would need to skip testing that selinux is configured
   # in centos and redhat because there we would need a reboot. As these are the two OSs that
   # we test in this control, we simply omit that check.
 end

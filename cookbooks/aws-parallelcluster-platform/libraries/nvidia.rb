@@ -39,6 +39,18 @@ def nvidia_package_url(base_url, platform, filename)
   end
 end
 
+# Distro tag appended to RPM filenames on the NVIDIA public repo (e.g., ".el8", ".el9").
+# PCluster S3 mirror strips this tag from filenames.
+def nvidia_rpm_distro_tag(base_url)
+  default_artifacts_url?(base_url) ? "" : ".el#{node['platform_version'].to_i}"
+end
+
+# Distro tag appended to DEB filenames on the NVIDIA public repo (e.g., "ubuntu1").
+# PCluster S3 mirror strips this tag from filenames.
+def nvidia_deb_distro_tag(base_url)
+  default_artifacts_url?(base_url) ? "" : "ubuntu1"
+end
+
 #
 # Check if the instance has a GPU
 #

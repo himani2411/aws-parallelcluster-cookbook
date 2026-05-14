@@ -40,6 +40,7 @@ def arch_suffix
 end
 
 def fabric_manager_url
-  nvidia_package_url(node['cluster']['nvidia']['fabricmanager']['base_url'], platform,
-    "#{fabric_manager_package}-#{fabric_manager_version}-1.#{arch_suffix}.rpm")
+  base_url = node['cluster']['nvidia']['fabricmanager']['base_url']
+  nvidia_package_url(base_url, platform,
+    "#{fabric_manager_package}-#{fabric_manager_version}-1#{nvidia_rpm_distro_tag(base_url)}.#{arch_suffix}.rpm")
 end

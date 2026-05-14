@@ -24,6 +24,7 @@ if platform?('amazon') && node['platform_version'] == "2"
 end
 default['cluster']['nvidia']['driver_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_driver"
 default['cluster']['nvidia']['dcgm_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_dcgm"
+default['cluster']['nvidia']['fabricmanager']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_fabric"
 
 # GDRCopy
 default['cluster']['nvidia']['gdrcopy']['version'] = '2.5.2'
@@ -32,6 +33,7 @@ default['cluster']['nvidia']['gdrcopy']['base_url'] = "#{node['cluster']['artifa
 
 # nvidia-imex
 default['cluster']['nvidia']['imex']['force_configuration'] = false
+default['cluster']['nvidia']['imex']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_imex"
 
 # NVIDIA NVLSM
 default['cluster']['nvidia']['nvlsm']['enabled'] = true

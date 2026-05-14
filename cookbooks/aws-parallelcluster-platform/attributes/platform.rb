@@ -22,6 +22,7 @@ if platform?('amazon') && node['platform_version'] == "2"
   default['cluster']['nvidia']['driver_version'] = '550.127.08'
   default['cluster']['nvidia']['dcgm_version'] = '3.3.6-1'
 end
+default['cluster']['nvidia']['driver_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_driver"
 default['cluster']['nvidia']['dcgm_base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_dcgm"
 
 # GDRCopy

@@ -9,6 +9,7 @@ This file is used to list changes made in each version of the AWS ParallelCluste
 **CHANGES**
 - Disable `algif_aead` kernel module on Ubuntu to address [CVE-2026-31431](https://nvd.nist.gov/vuln/detail/CVE-2026-31431).
 - Upgrade NVIDIA driver to version 580.126.18 (from 580.105.08) for all OSs except Amazon Linux 2 to address CVE-2025-33219.
+- Upgrade amazon-efs-utils to version 2.4.2 (from 2.4.0) to address CVE-2026-3336 and CVE-2026-3338.
 
 3.15.0
 ------

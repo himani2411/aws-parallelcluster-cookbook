@@ -41,5 +41,5 @@ end
 def fabric_manager_url
   base_url = node['cluster']['nvidia']['fabricmanager']['base_url']
   nvidia_package_url(base_url, platform,
-    "#{fabric_manager_package}_#{fabric_manager_version}-1_#{arch_suffix}.deb")
+    "#{fabric_manager_package}_#{fabric_manager_version}-1#{nvidia_deb_distro_tag(base_url)}_#{arch_suffix}.deb")
 end

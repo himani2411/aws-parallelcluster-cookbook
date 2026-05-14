@@ -42,5 +42,5 @@ end
 def nvidia_imex_url
   base_url = node['cluster']['nvidia']['imex']['base_url']
   nvidia_package_url(base_url, platform,
-    "#{nvidia_imex_package}-#{nvidia_imex_full_version}.#{arch_suffix}.rpm")
+    "#{nvidia_imex_package}-#{nvidia_imex_full_version}#{nvidia_rpm_distro_tag(base_url)}.#{arch_suffix}.rpm")
 end

@@ -41,8 +41,15 @@ end
 
 # Distro tag appended to RPM filenames on the NVIDIA public repo (e.g., ".el8", ".el9").
 # PCluster S3 mirror strips this tag from filenames.
+# Amazon Linux 2023 packages on the NVIDIA repo use ".amzn2023" distro tag.
 def nvidia_rpm_distro_tag(base_url)
-  default_artifacts_url?(base_url) ? "" : ".el#{node['platform_version'].to_i}"
+  return "" if default_artifacts_url?(base_url)
+
+  if platform?('amazon')
+    ".amzn2023"
+  else
+    ".el#{node['platform_version'].to_i}"
+  end
 end
 
 # Distro tag appended to DEB filenames on the NVIDIA public repo (e.g., "ubuntu1").

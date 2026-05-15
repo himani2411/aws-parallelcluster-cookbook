@@ -22,7 +22,7 @@
 - [Intel MPI; version 2021.17 (2021.17.2.94)](#intel-mpi-version-202117-202117294)
 - [setuptools; version 80.10.1](#setuptools-version-80101)
 - [jsonschema; version 4.26.0](#jsonschema-version-4260)
-- [efs-utils; version 2.4.2](#efs-utils-version-242)
+- [efs-utils; version 3.1.1](#efs-utils-version-311)
 - [tabulate; version 0.8.10](#tabulate-version-0810)
 - [gdrcopy; version 2.5.2](#gdrcopy-version-252)
 - [pyyaml; version 6.0.3](#pyyaml-version-603)
@@ -6287,7 +6287,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
-## efs-utils; version 2.4.2
+## efs-utils; version 3.1.1
 
 <https://github.com/aws/efs-utils>
 
@@ -6296,7 +6296,7 @@ Copyright 2017 Amazon.com, Inc. or its affiliates.
 
     * Package efs-utils's source code may be found at:
       https://us-east-1-aws-parallelcluster.s3.us-
-east-1.amazonaws.com/archives/dependencies/efs/v2.4.2.tar.gz
+east-1.amazonaws.com/archives/dependencies/efs/v3.1.1.tar.gz
 
 MIT License
 

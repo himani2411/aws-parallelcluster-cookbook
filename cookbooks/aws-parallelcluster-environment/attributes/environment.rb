@@ -73,8 +73,8 @@ default['cluster']['head_node_private_ip'] = nil
 default['cluster']['efa']['version'] = '1.47.0'
 default['cluster']['efa']['sha256'] = '2df4201e046833c7dc8160907bee7f52b76ff80ed147376a2d0ed8a0dd66b2db'
 
-default['cluster']['efs']['version'] = '2.4.2'
-default['cluster']['efs']['sha256'] = '0b1249279ec642b981bb775614790d2d206297cf96ade22241fa0b8b13cafb98'
+default['cluster']['efs']['version'] = '3.1.1'
+default['cluster']['efs']['sha256'] = '83ee7cb7af01ee817c42147493473b94723121bf8ba85d45bd2b7c4c40903a84'
 default['cluster']['efs']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/efs"
 
 default['cluster']['cfn_bootstrap']['version'] = '2.0-38'

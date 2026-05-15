@@ -43,6 +43,55 @@ describe 'nvidia_driver:_nvidia_driver_version' do
   end
 end
 
+describe 'nvidia_driver:nvidia_driver_url' do
+  cached(:driver_version) { 'fake_driver_version' }
+  cached(:s3_base_url) { 'fake_s3_base_url/dependencies/nvidia_driver' }
+  cached(:public_base_url) { 'fake_public_nvidia_url/tesla' }
+
+  context 'when driver_base_url uses default S3' do
+    cached(:chef_run) do
+      ChefSpec::SoloRunner.new(step_into: ['nvidia_driver']) do |node|
+        node.override['cluster']['nvidia']['driver_version'] = driver_version
+        node.override['cluster']['nvidia']['driver_base_url'] = s3_base_url
+      end
+    end
+
+    cached(:resource) do
+      ConvergeNvidiaDriver.setup(chef_run)
+      chef_run.find_resource('nvidia_driver', 'setup')
+    end
+
+    it 'constructs URL from S3 base_url' do
+      allow_any_instance_of(Object).to receive(:arm_instance?).and_return(false)
+      expect(resource.nvidia_driver_url).to eq("#{s3_base_url}/NVIDIA-Linux-x86_64-#{driver_version}.run")
+    end
+  end
+
+  context 'when driver_base_url is overridden to public NVIDIA Tesla URL' do
+    cached(:chef_run) do
+      ChefSpec::SoloRunner.new(step_into: ['nvidia_driver']) do |node|
+        node.override['cluster']['nvidia']['driver_version'] = driver_version
+        node.override['cluster']['nvidia']['driver_base_url'] = public_base_url
+      end
+    end
+
+    cached(:resource) do
+      ConvergeNvidiaDriver.setup(chef_run)
+      chef_run.find_resource('nvidia_driver', 'setup')
+    end
+
+    it 'constructs URL from overridden base_url' do
+      allow_any_instance_of(Object).to receive(:arm_instance?).and_return(false)
+      expect(resource.nvidia_driver_url).to eq("#{public_base_url}/NVIDIA-Linux-x86_64-#{driver_version}.run")
+    end
+
+    it 'uses aarch64 for ARM' do
+      allow_any_instance_of(Object).to receive(:arm_instance?).and_return(true)
+      expect(resource.nvidia_driver_url).to eq("#{public_base_url}/NVIDIA-Linux-aarch64-#{driver_version}.run")
+    end
+  end
+end
+
 describe 'nvidia_driver:nvidia_driver_enabled?' do
   for_all_oses do |platform, version|
     context "on #{platform}#{version}" do

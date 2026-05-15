@@ -98,4 +98,32 @@ describe 'aws-parallelcluster-platform::cuda' do
       is_expected.to create_remote_file('/tmp/cuda.run').with_source(cuda_url)
     end
   end
+
+  context 'when base_url is overridden (pipeline scenario)' do
+    cached(:custom_base_url) { 'https://developer.download.nvidia.com/compute/cuda' }
+    cached(:custom_samples_base_url) { 'https://github.com/NVIDIA/cuda-samples/archive/refs/tags' }
+    cached(:cuda_arch) { 'linux' }
+    cached(:cuda_url) { "#{custom_base_url}/cuda_#{cuda_complete_version}_#{cuda_version_suffix}_#{cuda_arch}.run" }
+    cached(:cuda_samples_url) { "#{custom_samples_base_url}/v#{cuda_version}.tar.gz" }
+
+    cached(:chef_run) do
+      allow_any_instance_of(Object).to receive(:nvidia_enabled?).and_return(true)
+      allow_any_instance_of(Object).to receive(:arm_instance?).and_return(false)
+      allow(::File).to receive(:exist?).with("/usr/local/cuda-#{cuda_version}").and_return(false)
+      allow(::File).to receive(:exist?).with("/usr/local/cuda-#{cuda_version}/samples").and_return(false)
+      ChefSpec::Runner.new do |node|
+        node.override['cluster']['nvidia']['cuda']['base_url'] = custom_base_url
+        node.override['cluster']['nvidia']['cuda']['samples_base_url'] = custom_samples_base_url
+      end.converge(described_recipe)
+    end
+    cached(:node) { chef_run.node }
+
+    it 'downloads CUDA run file from overridden base_url' do
+      is_expected.to create_remote_file('/tmp/cuda.run').with_source(cuda_url)
+    end
+
+    it 'downloads CUDA samples from overridden samples_base_url' do
+      is_expected.to create_remote_file('/tmp/cuda-sample.tar.gz').with_source(cuda_samples_url)
+    end
+  end
 end

@@ -25,6 +25,7 @@ use 'partial/_mount_umount'
 def adc_install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_version)
   <<-EFSUTILSINSTALL
       set -e
+      . "$HOME/.cargo/env"
       tar xf #{efs_utils_tarball}
       mv efs-proxy-dependencies-#{efs_utils_version}.tar.gz efs-utils-#{efs_utils_version}/src/proxy/
       cd efs-utils-#{efs_utils_version}/src/proxy/
@@ -37,7 +38,7 @@ def adc_install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_vers
 end
 
 def prerequisites
-  %w(rpm-build make rust go cargo openssl-devel cmake3 perl)
+  %w(rpm-build make go openssl-devel cmake3 perl)
 end
 
 action :install_efs_utils do

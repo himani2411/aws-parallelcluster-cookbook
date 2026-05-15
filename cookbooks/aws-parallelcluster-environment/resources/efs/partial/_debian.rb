@@ -16,6 +16,7 @@
 def install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_version)
   <<-EFSUTILSINSTALL
       set -e
+      . "$HOME/.cargo/env"
       tar xf #{efs_utils_tarball}
       cd efs-utils-#{efs_utils_version}
       ./build-deb.sh
@@ -24,5 +25,5 @@ def install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_version)
 end
 
 def prerequisites
-  %w(dkms pkg-config libssl-dev rustc cargo golang cmake perl)
+  %w(dkms pkg-config libssl-dev golang cmake perl)
 end

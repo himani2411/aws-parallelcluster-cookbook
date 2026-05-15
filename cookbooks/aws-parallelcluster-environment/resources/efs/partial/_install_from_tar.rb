@@ -28,6 +28,17 @@ action :install_utils do
     retry_delay 5
   end
 
+  # Install Rust via rustup to get a version new enough for efs-utils (>= 1.91.1)
+  bash 'install rust via rustup' do
+    code <<-RUSTUP
+      set -e
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      . "$HOME/.cargo/env"
+      rustc --version
+    RUSTUP
+    not_if 'source "$HOME/.cargo/env" 2>/dev/null && rustc --version | awk \'{print $2}\' | awk -F. \'{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }\''
+  end
+
   directory node['cluster']['sources_dir'] do
     recursive true
   end

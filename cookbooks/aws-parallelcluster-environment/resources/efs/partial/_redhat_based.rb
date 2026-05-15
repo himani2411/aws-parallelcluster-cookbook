@@ -16,6 +16,7 @@
 def install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_version)
   <<-EFSUTILSINSTALL
       set -e
+      . "$HOME/.cargo/env"
       tar xf #{efs_utils_tarball}
       cd efs-utils-#{efs_utils_version}
       make rpm
@@ -24,5 +25,5 @@ def install_script_code(efs_utils_tarball, efs_utils_package, efs_utils_version)
 end
 
 def prerequisites
-  %w(rpm-build make rust go cargo openssl-devel cmake3 perl)
+  %w(rpm-build make go openssl-devel cmake3 perl)
 end

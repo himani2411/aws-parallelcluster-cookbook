@@ -36,6 +36,7 @@ describe 'efs:install_utils' do
       cached(:bash_code) do
         <<-EFSUTILSINSTALL
       set -e
+      . "$HOME/.cargo/env"
       tar xf #{tarball_path}
       cd efs-utils-#{utils_version}
       ./build-deb.sh
@@ -142,6 +143,7 @@ describe 'efs:install_utils' do
       cached(:bash_code) do
         <<-EFSUTILSINSTALL
       set -e
+      . "$HOME/.cargo/env"
       tar xf #{tarball_path}
       cd efs-utils-#{utils_version}
       make rpm
@@ -150,8 +152,8 @@ describe 'efs:install_utils' do
       end
       cached(:required_packages) do
         {
-          "redhat" => %w(rpm-build make rust go cargo openssl-devel cmake perl),
-          "rocky" => %w(rpm-build make rust go cargo openssl-devel cmake perl),
+          "redhat" => %w(rpm-build make go openssl-devel cmake3 perl),
+          "rocky" => %w(rpm-build make go openssl-devel cmake3 perl),
         }
       end
 

@@ -277,3 +277,223 @@ describe 'default_artifacts_url? via enroot caps filename' do
     end
   end
 end
+
+
+# -------------------------------------------------------------------
+# nvidia_enabled? — tested via nvidia_install recipe guard
+# The recipe returns early if nvidia_enabled? is false
+# -------------------------------------------------------------------
+describe 'nvidia_enabled? via nvidia_driver resource' do
+  [
+    ['yes', true],
+    [true, true],
+    ['true', true],
+    ['no', false],
+    [false, false],
+    ['false', false],
+    ['any_other_value', false],
+  ].each do |input, should_install|
+    context "when node['cluster']['nvidia']['enabled'] is #{input.inspect}" do
+      cached(:chef_run) do
+        allow(::File).to receive(:exist?).and_call_original
+        allow(::File).to receive(:exist?).with('/usr/bin/nvidia-smi').and_return(false)
+        stub_command("lsinitramfs /boot/initrd.img-$(uname -r) | grep nouveau").and_return(false)
+        ChefSpec::SoloRunner.new(step_into: ['nvidia_driver']) do |node|
+          node.override['cluster']['nvidia']['enabled'] = input
+        end.converge('aws-parallelcluster-platform::nvidia_install')
+      end
+
+      if should_install
+        it 'runs nvidia driver install bash' do
+          is_expected.to run_bash('nvidia.run advanced')
+        end
+      else
+        it 'does not run nvidia driver install bash' do
+          is_expected.not_to run_bash('nvidia.run advanced')
+        end
+      end
+    end
+  end
+end
+
+# -------------------------------------------------------------------
+# nvidia_rpm_distro_tag — tested via IMEX RPM filename construction
+# S3 filenames have no distro tag; public repo filenames include it
+# -------------------------------------------------------------------
+describe 'nvidia_rpm_distro_tag via IMEX install' do
+  cached(:s3_base_url) { "https://fake-s3-bucket.s3.us-east-1.amazonaws.com/archives/dependencies/nvidia_imex" }
+  cached(:public_base_url) { 'https://fake-nvidia-public.example.com/compute/cuda/repos' }
+
+  {
+    ['amazon', '2023'] => '.amzn2023',
+    ['redhat', '8'] => '.el8',
+    ['redhat', '9'] => '.el9',
+    ['rocky', '8'] => '.el8',
+    ['rocky', '9'] => '.el9',
+  }.each do |(platform, version), expected_tag|
+    context "on #{platform}#{version} with public base_url" do
+      cached(:chef_run) do
+        stubs_for_resource('nvidia_imex') do |res|
+          allow(res).to receive(:nvidia_enabled_or_installed?).and_return(true)
+          allow(res).to receive(:imex_installed?).and_return(false)
+        end
+        allow_any_instance_of(Object).to receive(:arm_instance?).and_return(false)
+        runner = runner(platform: platform, version: version, step_into: ['nvidia_imex']) do |node|
+          node.override['cluster']['artifacts_s3_url'] = 'https://fake-s3-bucket.s3.us-east-1.amazonaws.com/archives'
+          node.override['cluster']['nvidia']['imex']['base_url'] = public_base_url
+          node.override['cluster']['nvidia']['driver_version'] = '580.105.08'
+        end
+        runner.converge_dsl('aws-parallelcluster-platform') do
+          nvidia_imex 'install' do
+            action :install
+          end
+        end
+      end
+
+      it "includes '#{expected_tag}' distro tag in the RPM filename" do
+        remote_file = chef_run.find_resource('remote_file', /nvidia-imex.*\.rpm/)
+        expect(remote_file.source.first).to match(/#{Regexp.escape(expected_tag)}/)
+      end
+    end
+
+    context "on #{platform}#{version} with default S3 base_url" do
+      cached(:chef_run) do
+        stubs_for_resource('nvidia_imex') do |res|
+          allow(res).to receive(:nvidia_enabled_or_installed?).and_return(true)
+          allow(res).to receive(:imex_installed?).and_return(false)
+        end
+        allow_any_instance_of(Object).to receive(:arm_instance?).and_return(false)
+        runner = runner(platform: platform, version: version, step_into: ['nvidia_imex']) do |node|
+          node.override['cluster']['artifacts_s3_url'] = 'https://fake-s3-bucket.s3.us-east-1.amazonaws.com/archives'
+          node.override['cluster']['nvidia']['imex']['base_url'] = s3_base_url
+          node.override['cluster']['nvidia']['driver_version'] = '580.105.08'
+        end
+        runner.converge_dsl('aws-parallelcluster-platform') do
+          nvidia_imex 'install' do
+            action :install
+          end
+        end
+      end
+
+      it "does not include distro tag in the RPM filename" do
+        remote_file = chef_run.find_resource('remote_file', /nvidia-imex.*\.rpm/)
+        expect(remote_file.source.first).not_to match(/\.el\d|\.amzn/)
+      end
+    end
+  end
+end
+
+# -------------------------------------------------------------------
+# get_pci_device_count — tested via fabric_manager configure action
+# enable_fabric_manager? uses get_gpu_count, get_nvswitch_count, etc.
+# -------------------------------------------------------------------
+describe 'get_pci_device_count via enable_fabric_manager?' do
+  cached(:fabric_manager_service) { 'nvidia-fabricmanager' }
+
+  context 'when multiple GPUs (>1) and NVSwitches (>1) detected' do
+    cached(:chef_run) do
+      stubs_for_provider('fabric_manager') do |res|
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0302').and_return(8)  # 8 GPUs
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0680').and_return(6)  # 6 NVSwitches
+        allow(res).to receive(:get_pci_device_count).with('15b3', '', '0207').and_return(0)  # 0 Mellanox
+        allow(res).to receive(:get_pci_device_count).with('10de', '2941').and_return(0)      # not GB200
+      end
+      runner = runner(platform: 'redhat', version: '8', step_into: ['fabric_manager'])
+      runner.converge_dsl('aws-parallelcluster-platform') do
+        fabric_manager 'configure' do
+          action :configure
+        end
+      end
+    end
+
+    it 'enables and starts fabric manager service' do
+      is_expected.to start_service(fabric_manager_service)
+        .with_action(%i(start enable))
+    end
+  end
+
+  context 'when multiple GPUs but only Mellanox bridges (no NVSwitches)' do
+    cached(:chef_run) do
+      stubs_for_provider('fabric_manager') do |res|
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0302').and_return(8)  # 8 GPUs
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0680').and_return(0)  # 0 NVSwitches
+        allow(res).to receive(:get_pci_device_count).with('15b3', '', '0207').and_return(4)  # 4 Mellanox CX-7
+        allow(res).to receive(:get_pci_device_count).with('10de', '2941').and_return(0)      # not GB200
+      end
+      runner = runner(platform: 'redhat', version: '8', step_into: ['fabric_manager'])
+      runner.converge_dsl('aws-parallelcluster-platform') do
+        fabric_manager 'configure' do
+          action :configure
+        end
+      end
+    end
+
+    it 'enables fabric manager (Mellanox bridges trigger it)' do
+      is_expected.to start_service(fabric_manager_service)
+        .with_action(%i(start enable))
+    end
+  end
+
+  context 'when single GPU (no multi-GPU topology)' do
+    cached(:chef_run) do
+      stubs_for_provider('fabric_manager') do |res|
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0302').and_return(1)  # 1 GPU
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0680').and_return(0)
+        allow(res).to receive(:get_pci_device_count).with('15b3', '', '0207').and_return(0)
+        allow(res).to receive(:get_pci_device_count).with('10de', '2941').and_return(0)
+      end
+      runner = runner(platform: 'redhat', version: '8', step_into: ['fabric_manager'])
+      runner.converge_dsl('aws-parallelcluster-platform') do
+        fabric_manager 'configure' do
+          action :configure
+        end
+      end
+    end
+
+    it 'does not start fabric manager service' do
+      is_expected.not_to start_service(fabric_manager_service)
+    end
+  end
+
+  context 'when zero GPUs' do
+    cached(:chef_run) do
+      stubs_for_provider('fabric_manager') do |res|
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0302').and_return(0)  # 0 GPUs
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0680').and_return(0)
+        allow(res).to receive(:get_pci_device_count).with('15b3', '', '0207').and_return(0)
+        allow(res).to receive(:get_pci_device_count).with('10de', '2941').and_return(0)
+      end
+      runner = runner(platform: 'redhat', version: '8', step_into: ['fabric_manager'])
+      runner.converge_dsl('aws-parallelcluster-platform') do
+        fabric_manager 'configure' do
+          action :configure
+        end
+      end
+    end
+
+    it 'does not start fabric manager service' do
+      is_expected.not_to start_service(fabric_manager_service)
+    end
+  end
+
+  context 'when GB200 node (multiple GPUs + NVSwitches but GB200 device detected)' do
+    cached(:chef_run) do
+      stubs_for_provider('fabric_manager') do |res|
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0302').and_return(8)
+        allow(res).to receive(:get_pci_device_count).with('10de', '', '0680').and_return(6)
+        allow(res).to receive(:get_pci_device_count).with('15b3', '', '0207').and_return(0)
+        allow(res).to receive(:get_pci_device_count).with('10de', '2941').and_return(4)      # GB200 detected
+      end
+      runner = runner(platform: 'redhat', version: '8', step_into: ['fabric_manager'])
+      runner.converge_dsl('aws-parallelcluster-platform') do
+        fabric_manager 'configure' do
+          action :configure
+        end
+      end
+    end
+
+    it 'does not start fabric manager (GB200 does not need it)' do
+      is_expected.not_to start_service(fabric_manager_service)
+    end
+  end
+end

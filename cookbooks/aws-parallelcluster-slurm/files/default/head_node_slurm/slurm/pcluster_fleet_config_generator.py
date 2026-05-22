@@ -16,6 +16,7 @@ import logging
 import traceback
 from typing import List
 
+import boto3
 import yaml
 
 log = logging.getLogger()
@@ -38,6 +39,56 @@ class ConfigurationFieldNotFoundError(Exception):
     """Field not found in configuration."""
 
     pass
+
+
+def _resolve_capacity_reservation_ids_from_group(group_arn: str, region: str) -> List[str]:
+    """
+    Resolve a CapacityReservationResourceGroupArn to a list of individual Capacity Reservation IDs.
+
+    Queries the Resource Groups service to get all capacity reservations in the group,
+    then filters for capacity-block reservations that are not expired/cancelled.
+    """
+    log.info("Resolving Capacity Reservation Resource Group ARN: %s", group_arn)
+    try:
+        resource_groups_client = boto3.client("resource-groups", region_name=region)
+        ec2_client = boto3.client("ec2", region_name=region)
+
+        # List resources in the group
+        paginator = resource_groups_client.get_paginator("list_group_resources")
+        resource_arns = []
+        for page in paginator.paginate(Group=group_arn):
+            for resource in page.get("Resources", []):
+                resource_identifier = resource.get("Identifier", {})
+                resource_arn = resource_identifier.get("ResourceArn", "")
+                if ":capacity-reservation/" in resource_arn:
+                    resource_arns.append(resource_arn)
+
+        if not resource_arns:
+            log.warning("No capacity reservations found in resource group: %s", group_arn)
+            return []
+
+        # Extract CR IDs from ARNs (format: arn:aws:ec2:region:account:capacity-reservation/cr-xxxxx)
+        cr_ids = [arn.split("/")[-1] for arn in resource_arns]
+        log.info("Found %d capacity reservations in group: %s", len(cr_ids), cr_ids)
+
+        # Filter out expired/cancelled reservations
+        active_cr_ids = []
+        # describe_capacity_reservations supports up to 100 IDs per call
+        batch_size = 100
+        for i in range(0, len(cr_ids), batch_size):
+            batch = cr_ids[i:i + batch_size]
+            response = ec2_client.describe_capacity_reservations(CapacityReservationIds=batch)
+            for cr in response.get("CapacityReservations", []):
+                state = cr.get("State", "")
+                if state not in ("expired", "cancelled", "payment-failed"):
+                    active_cr_ids.append(cr["CapacityReservationId"])
+
+        log.info("Active capacity reservations after filtering: %d - %s", len(active_cr_ids), active_cr_ids)
+        return active_cr_ids
+
+    except Exception as e:
+        log.error("Failed to resolve capacity reservations from group ARN %s: %s", group_arn, e)
+        raise CriticalError(f"Failed to resolve capacity reservations from group ARN {group_arn}: {e}")
 
 
 def generate_fleet_config_file(output_file: str, input_file: str):
@@ -73,6 +124,7 @@ def generate_fleet_config_file(output_file: str, input_file: str):
     }
     """
     cluster_config = _load_cluster_config(input_file)
+    region = cluster_config.get("Region")
     queue_name, compute_resource_name = None, None
     try:
         fleet_config = {}
@@ -88,6 +140,12 @@ def generate_fleet_config_file(output_file: str, input_file: str):
                 if queue_capacity_reservation_target
                 else None
             )
+            # Resolve GroupARN at queue level if present
+            queue_capacity_reservation_group_arn = (
+                queue_capacity_reservation_target.get("CapacityReservationResourceGroupArn")
+                if queue_capacity_reservation_target
+                else None
+            )
 
             fleet_config[queue_name] = {}
 
@@ -97,8 +155,10 @@ def generate_fleet_config_file(output_file: str, input_file: str):
                     queue_name=queue_name,
                     queue_allocation_strategy=queue_allocation_strategy,
                     queue_capacity_reservation=queue_capacity_reservation,
+                    queue_capacity_reservation_group_arn=queue_capacity_reservation_group_arn,
                     queue_capacity_type=queue_capacity_type,
                     queue_subnets=queue_config["Networking"]["SubnetIds"],
+                    region=region,
                 )
                 fleet_config[queue_name][compute_resource_name] = config_for_fleet
 
@@ -123,8 +183,10 @@ def _generate_compute_resource_fleet_config(
     queue_name: str,
     queue_allocation_strategy: str,
     queue_capacity_reservation: str,
+    queue_capacity_reservation_group_arn: str,
     queue_capacity_type: str,
     queue_subnets: List,
+    region: str,
 ):
     """
     Generate compute resource config to add in the fleet-config.json, overriding values from the queue.
@@ -132,6 +194,11 @@ def _generate_compute_resource_fleet_config(
     CapacityReservationTarget can be specified on both queue and compute resource level.
     CapacityType and AllocationStrategy are not yet supported at compute resource level from the CLI,
     but this code is ready to use them.
+
+    When a CapacityReservationResourceGroupArn is specified (instead of a single CapacityReservationId),
+    the group ARN is resolved to individual Capacity Reservation IDs via EC2 API. The resolved IDs are
+    stored as a list in "CapacityReservationIds" in the fleet config, enabling the CapacityBlockManager
+    to manage Slurm reservations for each CB individually.
 
     Returns compute_resource name and fleet-config section for the given compute resource.
     """
@@ -147,8 +214,29 @@ def _generate_compute_resource_fleet_config(
             if capacity_reservation_target
             else queue_capacity_reservation
         )
+
+        # Check for GroupARN at compute resource level, falling back to queue level
+        capacity_reservation_group_arn = (
+            capacity_reservation_target.get("CapacityReservationResourceGroupArn", queue_capacity_reservation_group_arn)
+            if capacity_reservation_target
+            else queue_capacity_reservation_group_arn
+        )
+
         if capacity_reservation:
+            # Single CR ID - existing behavior
             config_for_fleet.update({"CapacityReservationId": capacity_reservation})
+        elif capacity_reservation_group_arn and capacity_type == "capacity-block":
+            # GroupARN with capacity-block: resolve to individual CB IDs, store as list
+            cr_ids = _resolve_capacity_reservation_ids_from_group(capacity_reservation_group_arn, region)
+            if cr_ids:
+                config_for_fleet.update({"CapacityReservationId": cr_ids})
+            else:
+                log.warning(
+                    "No active capacity reservations found in group %s for queue %s, compute resource %s",
+                    capacity_reservation_group_arn,
+                    queue_name,
+                    compute_resource_name,
+                )
 
         if compute_resource_config.get("Instances"):
             # multiple instance types, create-fleet api
@@ -209,6 +297,11 @@ def main():
             "--input-file",
             help="Yaml file containing pcluster CLI configuration file with default values",
             required=True,
+        )
+        parser.add_argument(
+            "--region",
+            help="AWS region (optional, overrides region from config file)",
+            required=False,
         )
         args = parser.parse_args()
         generate_fleet_config_file(args.output_file, args.input_file)

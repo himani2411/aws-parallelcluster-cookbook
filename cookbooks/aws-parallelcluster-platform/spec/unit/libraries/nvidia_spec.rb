@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Tests for the nvidia.rb library helpers used by the dependency upgrade pipeline.
-# These helpers enable the pipeline to override base_url attributes to point at
-# public NVIDIA repos instead of the default PCluster S3 mirror.
+# Tests for the nvidia.rb library helpers that allow base_url attributes to be
+# overridden via ExtraChefAttributes (e.g. to point at public NVIDIA repos
+# instead of the default PCluster S3 mirror).
 #
 # Library methods are mixed into the Chef DSL context and only accessible during
 # action execution. We test them through resource outcomes (URLs passed to

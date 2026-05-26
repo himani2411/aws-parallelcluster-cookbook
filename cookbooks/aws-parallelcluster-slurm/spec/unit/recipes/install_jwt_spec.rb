@@ -60,6 +60,26 @@ describe 'aws-parallelcluster-slurm::install_jwt' do
           CODE
         )
       end
+
+      context "when base_url is overridden (pipeline scenario)" do
+        cached(:public_base_url) { 'https://fake-github.example.com/benmcollins/libjwt/archive/refs/tags' }
+
+        cached(:chef_run) do
+          runner = runner(platform: platform, version: version) do |node|
+            node.override['cluster']['sources_dir'] = cluster_sources_dir
+            node.override['cluster']['jwt']['version'] = jwt_version
+            node.override['cluster']['jwt']['sha256'] = jwt_checksum
+            node.override['cluster']['jwt']['base_url'] = public_base_url
+          end
+          runner.converge(described_recipe)
+        end
+
+        it 'downloads libjwt from overridden base_url' do
+          is_expected.to create_if_missing_remote_file("#{cluster_sources_dir}/libjwt-#{jwt_version}.tar.gz").with(
+            source: "#{public_base_url}/v#{jwt_version}.tar.gz"
+          )
+        end
+      end
     end
   end
 end

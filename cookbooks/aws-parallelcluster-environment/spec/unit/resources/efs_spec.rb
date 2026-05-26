@@ -81,7 +81,7 @@ describe 'efs:install_utils' do
         end
       end
 
-      context "when base_url is overridden (pipeline scenario)" do
+      context "when base_url is overridden via ExtraChefAttributes" do
         cached(:public_base_url) { 'https://fake-github.example.com/aws/efs-utils/archive' }
 
         cached(:chef_run) do

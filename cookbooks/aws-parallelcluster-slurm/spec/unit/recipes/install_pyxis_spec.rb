@@ -104,6 +104,29 @@ describe 'aws-parallelcluster-slurm::install_pyxis' do
           is_expected.not_to run_bash('Install pyxis')
         end
       end
+
+      context "when base_url is overridden (pipeline scenario)" do
+        cached(:public_base_url) { 'https://fake-github.example.com/NVIDIA/pyxis/archive/refs/tags' }
+
+        cached(:chef_run) do
+          runner = runner(platform: platform, version: version) do |node|
+            node.override['cluster']['sources_dir'] = cluster_sources_dir
+            node.override['cluster']['slurm']['install_dir'] = slurm_install_dir
+            node.override['cluster']['pyxis']['version'] = pyxis_version
+            node.override['cluster']['pyxis']['base_url'] = public_base_url
+          end
+          allow_any_instance_of(Object).to receive(:nvidia_enabled?).and_return(true)
+          allow_any_instance_of(Object).to receive(:nvidia_installed?).and_return(true)
+          allow_any_instance_of(Object).to receive(:pyxis_installed?).and_return(false)
+          runner.converge(described_recipe)
+        end
+
+        it 'downloads Pyxis tarball from overridden base_url' do
+          is_expected.to create_if_missing_remote_file("#{cluster_sources_dir}/pyxis-#{pyxis_version}.tar.gz").with(
+            source: "#{public_base_url}/v#{pyxis_version}.tar.gz"
+          )
+        end
+      end
     end
   end
 end

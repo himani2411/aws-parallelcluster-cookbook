@@ -20,6 +20,11 @@ execute 'stop clustermgtd' do
   not_if { ::File.exist?(node['cluster']['previous_cluster_config_path']) && !are_queues_updated? && !are_bulk_custom_slurm_settings_updated? }
 end
 
+# Apply (or roll back) custom Slurm patches when DevSettings.SlurmPatchesS3Archive
+# changes. The recipe is a no-op unless the archive URL differs from the cached
+# marker, so untouched updates incur no overhead.
+include_recipe 'aws-parallelcluster-slurm::update_slurm_patches'
+
 # Write the new config version to shared storage to signal compute nodes to update
 file node['cluster']['update']['trigger_file'] do
   content node['cluster']['cluster_config_version']

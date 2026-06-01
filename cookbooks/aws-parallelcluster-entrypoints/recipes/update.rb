@@ -13,7 +13,8 @@
 # limitations under the License.
 
 chef_handler 'ErrorHandlers::UpdateFailureHandler' do
-  arguments cleanup_dna_files: true, start_clustermgtd: true
+  arguments cleanup_dna_files: true, start_clustermgtd: true,
+            restore_slurm_patches: !node['cluster']['slurm_patches_s3_archive'].to_s.empty?
   type exception: true
 end
 

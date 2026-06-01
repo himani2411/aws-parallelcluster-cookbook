@@ -198,6 +198,18 @@ describe 'aws-parallelcluster-slurm::update_slurm_patches' do
           is_expected.to start_service('slurmctld')
           is_expected.to start_service('supervisord')
         end
+
+        it 'writes a sentinel before the destructive section so the failure handler can roll back' do
+          is_expected.to create_file("#{base_dir}/.slurm_patches_in_progress").with(
+            owner: 'root',
+            group: 'root',
+            mode: '0644'
+          )
+        end
+
+        it 'deletes the sentinel after the rebuild completes successfully' do
+          is_expected.to delete_file("#{base_dir}/.slurm_patches_in_progress")
+        end
       end
 
       context 'when archive URL differs and slurmdbd is in use' do

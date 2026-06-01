@@ -65,8 +65,13 @@ describe 'aws-parallelcluster-entrypoints::update' do
               end
 
               it "enables the update failure handler" do
+                expected_restore_flag = !chef_run.node['cluster']['slurm_patches_s3_archive'].to_s.empty?
                 expect(chef_run).to enable_chef_handler('ErrorHandlers::UpdateFailureHandler').with(
-                  arguments: { cleanup_dna_files: true, start_clustermgtd: true },
+                  arguments: {
+                    cleanup_dna_files: true,
+                    start_clustermgtd: true,
+                    restore_slurm_patches: expected_restore_flag,
+                  },
                   type: { exception: true }
                 )
               end
@@ -78,6 +83,30 @@ describe 'aws-parallelcluster-entrypoints::update' do
                   is_expected.not_to delete_file("#{node['cluster']['shared_dir']}/update_failed_marker")
                 end
               end
+            end
+          end
+
+          context "and a Slurm patches archive is configured" do
+            cached(:chef_run) do
+              runner = runner(platform: platform, version: version) do |node|
+                allow_any_instance_of(Object).to receive(:fetch_config).and_return(OpenStruct.new)
+
+                node.override['cluster']['node_type'] = node_type
+                node.override['cluster']['scheduler'] = 'slurm'
+                node.override['cluster']['slurm_patches_s3_archive'] = 's3://example-bucket/slurm-patches.tar.gz'
+              end
+              runner.converge(described_recipe)
+            end
+
+            it "enables the update failure handler with restore_slurm_patches: true" do
+              expect(chef_run).to enable_chef_handler('ErrorHandlers::UpdateFailureHandler').with(
+                arguments: {
+                  cleanup_dna_files: true,
+                  start_clustermgtd: true,
+                  restore_slurm_patches: true,
+                },
+                type: { exception: true }
+              )
             end
           end
         end

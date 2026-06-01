@@ -24,13 +24,15 @@
 #   * The Slurm install dir (node['cluster']['slurm']['install_dir'], typically
 #     /opt/slurm) is an NFS-loopback mountpoint on the head node; we cannot
 #     remove the mountpoint itself, only its contents.
-#   * The compute fleet must be stopped before invoking this recipe — enforced
-#     via the COMPUTE_FLEET_STOP update policy on the schema field.
+#   * The compute fleet must be stopped before invoking this recipe -- enforced
+#     via the COMPUTE_FLEET_STOP update policy on the schema field in CLI.
 #   * <slurm_install_dir>/etc (slurm.conf, gres.conf, slurmdbd.conf, JWT key,
 #     plugin configs) is preserved by snapshotting before rebuild and
 #     restoring after.
 #   * A marker file at <base_dir>/.slurm_patches_archive caches the
 #     last-applied archive URL so that idempotent updates skip the rebuild.
+
+require 'json'
 
 return unless node['cluster']['node_type'] == 'HeadNode'
 
@@ -52,6 +54,7 @@ return if archive_url.empty?
 slurm_install_dir = node['cluster']['slurm']['install_dir']
 slurm_etc_dir = "#{slurm_install_dir}/etc"
 applied_marker = "#{node['cluster']['base_dir']}/.slurm_patches_archive"
+sentinel_path = "#{node['cluster']['base_dir']}/.slurm_patches_in_progress"
 
 previously_applied = ::File.exist?(applied_marker) ? ::File.read(applied_marker).strip : ''
 
@@ -64,6 +67,30 @@ backup_dir = "#{slurm_install_dir}.bak.#{Time.now.strftime('%Y%m%d-%H%M%S')}"
 # section under SlurmSettings. Use this flag to gate the service stop/start
 # steps and avoid touching a unit that doesn't exist on this head node.
 slurmdbd_in_use = !node['cluster']['config'].dig(:Scheduling, :SlurmSettings, :Database).nil?
+
+# Sentinel for UpdateFailureHandler. Written *before* we stop any services so
+# the handler can recover from any failure point in this recipe, including:
+#   * service stop fails / preflight raises (no backup_dir yet -> handler
+#     just restarts services, since /opt/slurm is intact)
+#   * snapshot fails (backup_dir unset -> same)
+#   * empty/install_slurm/restore/start fail (backup_dir set, full restore)
+#
+# JSON format keeps native types (booleans, nil) so the handler reads values
+# without manual string-casting. We deliberately omit backup_dir from this
+# initial write; the handler treats absence of backup_dir as "no destructive
+# change yet, just restart daemons."
+file sentinel_path do
+  content lazy {
+    JSON.pretty_generate(
+      slurm_install_dir: slurm_install_dir,
+      slurmdbd_in_use: slurmdbd_in_use,
+      archive_url: archive_url
+    )
+  }
+  owner 'root'
+  group 'root'
+  mode '0644'
+end
 
 service 'supervisord' do
   action :stop
@@ -104,6 +131,23 @@ end
 
 execute "snapshot #{slurm_install_dir} before rebuild" do
   command "cp -a #{slurm_install_dir} #{backup_dir}"
+end
+
+# Update the sentinel with backup_dir now that the snapshot exists. From this
+# point on, any handler invocation will perform a full restore from the
+# backup, not just a service restart.
+file sentinel_path do
+  content lazy {
+    JSON.pretty_generate(
+      slurm_install_dir: slurm_install_dir,
+      slurmdbd_in_use: slurmdbd_in_use,
+      archive_url: archive_url,
+      backup_dir: backup_dir
+    )
+  }
+  owner 'root'
+  group 'root'
+  mode '0644'
 end
 
 execute "empty #{slurm_install_dir} contents (mountpoint preserved)" do
@@ -154,6 +198,12 @@ end
 service 'slurmdbd' do
   action :start
   only_if { slurmdbd_in_use }
+end
+
+# Recipe completed successfully. Drop the sentinel so the handler is a no-op
+# on any subsequent failure unrelated to the patch rebuild.
+file sentinel_path do
+  action :delete
 end
 
 log 'slurm_patches_rebuild_complete' do

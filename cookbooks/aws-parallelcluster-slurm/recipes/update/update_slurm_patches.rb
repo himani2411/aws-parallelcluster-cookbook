@@ -64,9 +64,15 @@ return if archive_url == previously_applied
 backup_dir = "#{slurm_install_dir}.bak.#{Time.now.strftime('%Y%m%d-%H%M%S')}"
 
 # Slurmdbd is only present and managed when the cluster config has a Database
-# section under SlurmSettings. Use this flag to gate the service stop/start
-# steps and avoid touching a unit that doesn't exist on this head node.
-slurmdbd_in_use = !node['cluster']['config'].dig(:Scheduling, :SlurmSettings, :Database).nil?
+# section under SlurmSettings. We defer this check to converge time because
+# node['cluster']['config'] is populated by the `load_cluster_config`
+# ruby_block earlier in the update flow -- not at recipe compile time.
+# Wrap as a lambda so every consumer (lazy {} for the sentinel JSON,
+# only_if {} for the slurmdbd service guards) re-reads the same value when
+# their closure fires during converge.
+slurmdbd_in_use = lambda do
+  !node['cluster']['config'].dig(:Scheduling, :SlurmSettings, :Database).nil?
+end
 
 # Sentinel for UpdateFailureHandler. Written *before* we stop any services so
 # the handler can recover from any failure point in this recipe, including:
@@ -83,7 +89,7 @@ file sentinel_path do
   content lazy {
     JSON.pretty_generate(
       slurm_install_dir: slurm_install_dir,
-      slurmdbd_in_use: slurmdbd_in_use,
+      slurmdbd_in_use: slurmdbd_in_use.call,
       archive_url: archive_url
     )
   }
@@ -102,7 +108,7 @@ end
 
 service 'slurmdbd' do
   action :stop
-  only_if { slurmdbd_in_use }
+  only_if { slurmdbd_in_use.call }
 end
 
 ruby_block "preflight: check no foreign processes hold files in #{slurm_install_dir}" do
@@ -140,7 +146,7 @@ file sentinel_path do
   content lazy {
     JSON.pretty_generate(
       slurm_install_dir: slurm_install_dir,
-      slurmdbd_in_use: slurmdbd_in_use,
+      slurmdbd_in_use: slurmdbd_in_use.call,
       archive_url: archive_url,
       backup_dir: backup_dir
     )
@@ -197,7 +203,7 @@ end
 
 service 'slurmdbd' do
   action :start
-  only_if { slurmdbd_in_use }
+  only_if { slurmdbd_in_use.call }
 end
 
 # Recipe completed successfully. Drop the sentinel so the handler is a no-op

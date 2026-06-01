@@ -33,6 +33,11 @@ describe 'aws-parallelcluster-slurm::update_slurm_patches' do
     node.override['cluster']['slurm_patches_s3_archive'] = archive
     node.override['cluster']['slurm']['install_dir'] = '/MOCK_SLURM_INSTALL_DIR'
     node.override['cluster']['base_dir'] = '/MOCK_BASE_DIR'
+    # `node['cluster']['config']` is normally populated by the
+    # `load_cluster_config` ruby_block during the update flow. The recipe's
+    # `slurmdbd_in_use` lambda reads it at converge time -- chefspec's
+    # converge runs ruby_blocks for us, but we don't include the loader
+    # here, so override the attribute directly to mimic the post-load state.
     node.override['cluster']['config'] = { Scheduling: { SlurmSettings: slurm_settings } }
   end
 

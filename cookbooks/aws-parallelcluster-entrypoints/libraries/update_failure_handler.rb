@@ -122,7 +122,7 @@ module ErrorHandlers
         # Recipe failed before snapshot completed. Install dir is untouched;
         # we just need to bring daemons back up.
         Chef::Log.warn("#{log_prefix} Slurm patch flow interrupted before snapshot; restarting daemons against unchanged #{slurm_install_dir}")
-        return unless start_slurm_daemons(slurmdbd_in_use?)
+        return unless start_slurm_daemons(slurmdbd_in_use?, slurmrestd_in_use?)
         ::File.delete(slurm_patches_sentinel_path)
         Chef::Log.info("#{log_prefix} Slurm daemons restarted; sentinel cleared")
         return
@@ -137,7 +137,7 @@ module ErrorHandlers
 
       # Stop daemons that may have been left running half-installed. Errors are
       # tolerated here -- daemons may already be stopped from the failed run.
-      stop_slurm_daemons(slurmdbd_in_use?)
+      stop_slurm_daemons(slurmdbd_in_use?, slurmrestd_in_use?)
 
       # Empty whatever's in the install dir -- could be a partial rebuild.
       unless command_runner.run_with_retries(
@@ -158,7 +158,7 @@ module ErrorHandlers
       end
 
       # Bring services back up against the restored tree.
-      return unless start_slurm_daemons(slurmdbd_in_use?)
+      return unless start_slurm_daemons(slurmdbd_in_use?, slurmrestd_in_use?)
 
       # Only delete the sentinel after every step above succeeded. If we
       # bailed early via `return`, the sentinel stays and the next chef run
@@ -167,18 +167,23 @@ module ErrorHandlers
       Chef::Log.info("#{log_prefix} Slurm restore from #{backup_dir} completed; sentinel cleared")
     end
 
-    def stop_slurm_daemons(slurmdbd_in_use)
+    def stop_slurm_daemons(slurmdbd_in_use, slurmrestd_in_use = false)
       run_service_action(:stop, 'slurmctld', 'supervisord')
-      return unless slurmdbd_in_use
-      run_service_action(:stop, 'slurmdbd')
+      run_service_action(:stop, 'slurmdbd') if slurmdbd_in_use
+      run_service_action(:stop, 'slurmrestd') if slurmrestd_in_use
     end
 
-    def start_slurm_daemons(slurmdbd_in_use)
+    def start_slurm_daemons(slurmdbd_in_use, slurmrestd_in_use = false)
       ok = run_service_action(:start, 'slurmctld', 'supervisord')
       return false unless ok
 
-      return true unless slurmdbd_in_use
-      run_service_action(:start, 'slurmdbd')
+      if slurmdbd_in_use
+        ok = run_service_action(:start, 'slurmdbd')
+        return false unless ok
+      end
+
+      return true unless slurmrestd_in_use
+      run_service_action(:start, 'slurmrestd')
     end
 
     # Run a service control action via systemctl (default) or supervisorctl.
@@ -246,6 +251,10 @@ module ErrorHandlers
 
     def slurmdbd_in_use?
       slurm_patches_metadata['slurmdbd_in_use'] == true
+    end
+
+    def slurmrestd_in_use?
+      slurm_patches_metadata['slurmrestd_in_use'] == true
     end
 
     def backup_dir

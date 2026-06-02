@@ -74,6 +74,23 @@ slurmdbd_in_use = lambda do
   !node['cluster']['config'].dig(:Scheduling, :SlurmSettings, :Database).nil?
 end
 
+# slurmrestd is set up by user-supplied OnNodeConfigured custom actions, not
+# by this cookbook -- so the cluster YAML doesn't tell us whether it's
+# running. Detect it dynamically: if the systemd unit is active right now,
+# it'll be holding files in #{slurm_install_dir} (libslurm.so etc.) and the
+# preflight will refuse to proceed unless we stop it. Memoize on first call
+# so the recipe doesn't shell out twice for the same answer between sentinel
+# write and the only_if guards.
+slurmrestd_was_active = nil
+slurmrestd_in_use = lambda do
+  if slurmrestd_was_active.nil?
+    is_active = Mixlib::ShellOut.new('systemctl', 'is-active', '--quiet', 'slurmrestd')
+    is_active.run_command
+    slurmrestd_was_active = is_active.exitstatus.zero?
+  end
+  slurmrestd_was_active
+end
+
 # Sentinel for UpdateFailureHandler. Written *before* we stop any services so
 # the handler can recover from any failure point in this recipe, including:
 #   * service stop fails / preflight raises (no backup_dir yet -> handler
@@ -90,6 +107,7 @@ file sentinel_path do
     JSON.pretty_generate(
       slurm_install_dir: slurm_install_dir,
       slurmdbd_in_use: slurmdbd_in_use.call,
+      slurmrestd_in_use: slurmrestd_in_use.call,
       archive_url: archive_url
     )
   }
@@ -109,6 +127,11 @@ end
 service 'slurmdbd' do
   action :stop
   only_if { slurmdbd_in_use.call }
+end
+
+service 'slurmrestd' do
+  action :stop
+  only_if { slurmrestd_in_use.call }
 end
 
 ruby_block "preflight: check no foreign processes hold files in #{slurm_install_dir}" do
@@ -147,6 +170,7 @@ file sentinel_path do
     JSON.pretty_generate(
       slurm_install_dir: slurm_install_dir,
       slurmdbd_in_use: slurmdbd_in_use.call,
+      slurmrestd_in_use: slurmrestd_in_use.call,
       archive_url: archive_url,
       backup_dir: backup_dir
     )
@@ -204,6 +228,11 @@ end
 service 'slurmdbd' do
   action :start
   only_if { slurmdbd_in_use.call }
+end
+
+service 'slurmrestd' do
+  action :start
+  only_if { slurmrestd_in_use.call }
 end
 
 # Recipe completed successfully. Drop the sentinel so the handler is a no-op

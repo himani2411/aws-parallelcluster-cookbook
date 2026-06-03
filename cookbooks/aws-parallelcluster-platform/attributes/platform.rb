@@ -47,6 +47,10 @@ default['cluster']['nvidia']['gdrcopy']['base_url'] = "#{node['cluster']['artifa
 default['cluster']['nvidia']['imex']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_imex"
 default['cluster']['nvidia']['imex']['force_configuration'] = false
 
+# nvidia-modprobe — required as a hard dependency by nvidia-imex starting in
+# driver branch 580.159; installed as a registered package so dpkg/rpm see it.
+default['cluster']['nvidia']['modprobe']['base_url'] = "#{node['cluster']['artifacts_s3_url']}/dependencies/nvidia_modprobe"
+
 # NVIDIA NVLSM
 default['cluster']['nvidia']['nvlsm']['enabled'] = true
 default['cluster']['nvidia']['nvlsm']['version'] = '2025.03.9-1'

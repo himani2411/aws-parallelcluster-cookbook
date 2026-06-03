@@ -23,6 +23,12 @@ gdrcopy 'Install Nvidia gdrcopy'
 
 nvidia_nvlsm 'Install Nvidia NVLink Subnet Manager'
 
+# nvidia-modprobe must be a registered package before nvidia-imex (and other
+# 580.159+ sidecar packages that declare a hard `Depends:` on it) installs.
+# The driver .run installer drops the binary but doesn't register it with
+# dpkg/rpm, so the package install here is what actually satisfies the dep.
+nvidia_modprobe 'Install nvidia-modprobe'
+
 fabric_manager 'Install Nvidia Fabric Manager'
 
 nvidia_dcgm 'install Nvidia datacenter-gpu-manager'

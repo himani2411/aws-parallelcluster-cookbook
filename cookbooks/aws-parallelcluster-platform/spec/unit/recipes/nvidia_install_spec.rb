@@ -25,6 +25,10 @@ describe 'aws-parallelcluster-platform::nvidia_install' do
         is_expected.to install_nvidia_nvlsm('Install Nvidia NVLink Subnet Manager')
       end
 
+      it 'installs nvidia_modprobe' do
+        is_expected.to install_nvidia_modprobe('Install nvidia-modprobe')
+      end
+
       it 'installs fabric_manager' do
         is_expected.to setup_fabric_manager('Install Nvidia Fabric Manager')
       end

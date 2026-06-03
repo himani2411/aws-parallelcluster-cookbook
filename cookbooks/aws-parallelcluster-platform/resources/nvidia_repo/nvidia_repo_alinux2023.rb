@@ -19,7 +19,7 @@ end
 use 'partial/_nvidia_repo_common.rb'
 
 def platform
-  'rhel9'
+  "amzn#{node['platform_version'].to_i}"
 end
 
 def repository_key

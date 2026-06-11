@@ -48,9 +48,7 @@ end
 action_class do
   def el_version
     platform_version = node['platform_version'].to_i
-    if platform_version == 2
-      7
-    elsif platform_version == 2023
+    if platform_version == 2023
       9
     else
       platform_version
@@ -71,11 +69,8 @@ action_class do
   end
 
   # MySQL community client RPM filenames for this platform/arch.
-  # libs-compat only ships (and is only needed) on el7.
   def mysql_rpm_components
-    components = %w(common client-plugins libs devel)
-    components << 'libs-compat' if el_version == 7
-    components
+    %w(common client-plugins libs devel)
   end
 
   def mysql_rpm_filenames

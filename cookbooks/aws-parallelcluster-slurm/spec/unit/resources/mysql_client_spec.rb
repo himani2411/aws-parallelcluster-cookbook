@@ -28,9 +28,7 @@ describe 'mysql_client:setup' do
         cached(:s3_url) { 's3://url' }
         cached(:mysql_base_url) { "#{s3_url}/mysql" }
         cached(:el_version) do
-          if version.to_i == 2
-            7
-          elsif platform == 'amazon' && version == '2023'
+          if platform == 'amazon' && version == '2023'
             9
           else
             version.to_i
@@ -40,7 +38,6 @@ describe 'mysql_client:setup' do
         cached(:package_base_url) { "#{mysql_base_url}/#{package_platform}" }
         cached(:mysql_rpm_filenames) do
           components = %w(common client-plugins libs devel)
-          components << 'libs-compat' if el_version == 7
           components.map { |c| "mysql-community-#{c}-#{package_version}.el#{el_version}.#{architecture}.rpm" }
         end
         # Ubuntu installs from the apt repository by package name; RHEL-based

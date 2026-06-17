@@ -16,6 +16,14 @@ def gdrcopy_version
   node['cluster']['nvidia']['gdrcopy']['version']
 end
 
+# True if gdrcopy is installed (regardless of version). Like nvidia-smi for the
+# driver, the gdrcopy_sanity binary is the one of the test commands that are
+# installed by GDRCopy and we use it as signal of a healthy install
+# and is installed to /usr/bin on all platforms.
+def gdrcopy_installed?
+  ::File.exist?('/usr/bin/gdrcopy_sanity')
+end
+
 def gdrcopy_checksum
   node['cluster']['nvidia']['gdrcopy']['sha256']
 end

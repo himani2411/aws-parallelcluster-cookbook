@@ -42,6 +42,12 @@ action :install_package do
   end
 end
 
+# True if any DCGM package is installed, regardless of version (a DLAMI may
+# ship datacenter-gpu-manager-4-* packages).
+def dcgm_installed?
+  !shell_out("rpm -qa '#{dcgm_package}*'").stdout.strip.empty?
+end
+
 def dcgm_package
   'datacenter-gpu-manager'
 end

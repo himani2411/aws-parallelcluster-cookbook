@@ -19,6 +19,10 @@ property :nvidia_enabled, [true, false, nil]
 
 action :setup do
   return unless _nvidia_dcgm_enabled
+  # Skip if DCGM is already installed (e.g. DLAMI). Reinstalling a different
+  # version breaks the preinstalled, version-pinned DCGM subpackages and leaves
+  # the package manager in a broken state, failing later package installs.
+  return if dcgm_installed?
 
   action_install_package
 end

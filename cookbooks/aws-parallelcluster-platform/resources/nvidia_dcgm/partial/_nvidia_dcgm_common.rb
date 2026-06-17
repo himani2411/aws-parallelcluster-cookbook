@@ -22,7 +22,7 @@ action :setup do
   # Skip if DCGM is already installed (e.g. DLAMI). Reinstalling a different
   # version breaks the preinstalled, version-pinned DCGM subpackages and leaves
   # the package manager in a broken state, failing later package installs.
-  return if dcgm_installed?
+  return if dcgmi_installed?
 
   action_install_package
 end
@@ -34,7 +34,7 @@ end
 # True if DCGM is installed (regardless of version). Like nvidia-smi for the
 # driver, the dcgmi binary is the single signal of a healthy install and is
 # installed to /usr/bin on all platforms.
-def dcgm_installed?
+def dcgmi_installed?
   ::File.exist?('/usr/bin/dcgmi')
 end
 

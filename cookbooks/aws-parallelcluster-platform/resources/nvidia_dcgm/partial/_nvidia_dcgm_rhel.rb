@@ -42,13 +42,6 @@ action :install_package do
   end
 end
 
-# True if the base DCGM package is installed (regardless of version). The other
-# DCGM subpackages pin its exact version, so it is the single signal of a
-# healthy install.
-def dcgm_installed?
-  shell_out("rpm -q #{dcgm4_package}").exitstatus.zero?
-end
-
 def dcgm_package
   'datacenter-gpu-manager'
 end

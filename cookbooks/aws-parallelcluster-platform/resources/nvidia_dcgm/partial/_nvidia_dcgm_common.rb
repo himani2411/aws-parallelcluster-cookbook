@@ -31,6 +31,13 @@ def _nvidia_enabled
   nvidia_enabled.nil? ? ['yes', true, 'true'].include?(node['cluster']['nvidia']['enabled']) : nvidia_enabled
 end
 
+# True if DCGM is installed (regardless of version). Like nvidia-smi for the
+# driver, the dcgmi binary is the single signal of a healthy install and is
+# installed to /usr/bin on all platforms.
+def dcgm_installed?
+  ::File.exist?('/usr/bin/dcgmi')
+end
+
 def package_version
   node['cluster']['nvidia']['dcgm_version']
 end

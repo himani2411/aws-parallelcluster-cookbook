@@ -27,6 +27,9 @@ action :setup do
   return unless gdrcopy_enabled?
   return if on_docker?
 
+  # Skip rebuild + install if already installed (e.g. DLAMI).
+  return if gdrcopy_installed?
+
   # Save gdrcopy version for InSpec tests
   node.default['cluster']['nvidia']['gdrcopy']['version'] = gdrcopy_version
   node.default['cluster']['nvidia']['gdrcopy']['service'] = gdrcopy_service
@@ -90,7 +93,6 @@ action :configure do
   return if on_docker?
   # Save gdrcopy version for InSpec tests
   node.default['cluster']['nvidia']['gdrcopy']['version'] = gdrcopy_version
-  node.default['cluster']['nvidia']['gdrcopy']['service'] = gdrcopy_service
   node_attributes 'dump node attributes'
 
   if graphic_instance? && is_service_installed?(gdrcopy_service)

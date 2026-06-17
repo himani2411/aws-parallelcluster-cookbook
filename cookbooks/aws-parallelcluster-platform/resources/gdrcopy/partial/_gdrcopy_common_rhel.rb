@@ -16,6 +16,12 @@ def gdrcopy_service
   'gdrcopy'
 end
 
+# True if any gdrcopy package (gdrcopy, gdrcopy-kmod, gdrcopy-devel) is
+# installed, regardless of version -- e.g. a DLAMI may ship only gdrcopy-kmod.
+def gdrcopy_installed?
+  !shell_out("rpm -qa 'gdrcopy*'").stdout.strip.empty?
+end
+
 def gdrcopy_build_dependencies
   %w(dkms rpm-build make check check-devel subunit subunit-devel)
 end

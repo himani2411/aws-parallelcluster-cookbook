@@ -44,6 +44,13 @@ def gdrcopy_service
   'gdrdrv'
 end
 
+# True if any gdrcopy package (gdrcopy, gdrdrv-dkms, libgdrapi, gdrcopy-tests)
+# is installed, regardless of version -- e.g. a DLAMI may ship only gdrdrv-dkms.
+def gdrcopy_installed?
+  shell_out("dpkg-query -W -f='${Status}\n' 'gdrcopy*' 'gdrdrv*' 'libgdrapi*'")
+    .stdout.include?('install ok installed')
+end
+
 def gdrcopy_platform
   "Ubuntu#{node['platform_version'].gsub(/\./, '_')}"
 end

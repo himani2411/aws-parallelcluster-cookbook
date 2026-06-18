@@ -44,13 +44,6 @@ def gdrcopy_service
   'gdrdrv'
 end
 
-# True if the main gdrcopy package is installed (regardless of version). The
-# gdrcopy meta-package depends on exact versions of gdrdrv-dkms, libgdrapi and
-# gdrcopy-tests, so its presence is the single signal that the set is installed.
-def gdrcopy_installed?
-  shell_out("dpkg-query -W -f='${Status}' gdrcopy").stdout.strip == 'install ok installed'
-end
-
 def gdrcopy_platform
   "Ubuntu#{node['platform_version'].gsub(/\./, '_')}"
 end

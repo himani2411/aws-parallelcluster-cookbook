@@ -16,13 +16,6 @@ def gdrcopy_service
   'gdrcopy'
 end
 
-# True if the main gdrcopy package is installed (regardless of version).
-# Like nvidia-smi for the driver, the main package is the single signal of a
-# healthy install: the -kmod/-devel subpackages pin an exact gdrcopy version.
-def gdrcopy_installed?
-  shell_out('rpm -q gdrcopy').exitstatus.zero?
-end
-
 def gdrcopy_build_dependencies
   %w(dkms rpm-build make check check-devel subunit subunit-devel)
 end

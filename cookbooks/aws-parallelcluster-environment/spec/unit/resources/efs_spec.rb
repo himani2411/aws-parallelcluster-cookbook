@@ -23,6 +23,12 @@ def mock_already_installed(package, expected_version, installed)
 end
 
 describe 'efs:install_utils' do
+  # The rustup prereq resource's not_if runs a shell command; ChefSpec blocks
+  # real execution, so stub it. false => installed Rust is too old => rustup runs.
+  before do
+    stub_command("source \"$HOME/.cargo/env\" 2>/dev/null && rustc --version | awk '{print $2}' | awk -F. '{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }'").and_return(false)
+  end
+
   for_oses([
              %w(ubuntu 24.04),
              %w(ubuntu 22.04),
@@ -73,6 +79,10 @@ describe 'efs:install_utils' do
             .with(retries: 3)
             .with(retry_delay: 5)
             .with(checksum: tarball_checksum)
+        end
+
+        it 'installs rust via rustup' do
+          is_expected.to run_bash('install rust via rustup')
         end
 
         it 'installs package from downloaded tarball' do
@@ -181,6 +191,10 @@ describe 'efs:install_utils' do
         it 'installs prerequisites' do
           is_expected.to install_robust_package('install efs-utils prerequisites')
             .with(packages: required_packages[platform])
+        end
+
+        it 'installs rust via rustup' do
+          is_expected.to run_bash('install rust via rustup')
         end
 
         it 'downloads tarball' do

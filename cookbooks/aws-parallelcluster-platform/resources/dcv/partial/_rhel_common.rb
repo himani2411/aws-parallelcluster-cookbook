@@ -133,15 +133,21 @@ action_class do
     # So `rpm` installation is needed to remove requirement of Internet access.
     # Install dependencies from downloaded RPMs (offline)
     dcv_gl_deps_dir = "#{node['cluster']['sources_dir']}/dcv-gl-deps"
+    # retries absorb sporadic /var/lib/rpm/.rpm.lock contention from background
+    # dnf actors (dnf-makecache timer, PackageKit) at cluster-create time.
     execute 'install dcv-gl dependencies offline' do
       command "rpm -ivh #{dcv_gl_deps_dir}/*.rpm"
       only_if { ::Dir.exist?(dcv_gl_deps_dir) && !::Dir.empty?(dcv_gl_deps_dir) }
+      retries 3
+      retry_delay 5
     end
 
     package = "#{node['cluster']['sources_dir']}/#{dcv_package}/#{dcv_gl}"
     # Install dcv-gl without repo access
     execute 'install dcv-gl offline' do
       command "rpm -ivh #{package}"
+      retries 3
+      retry_delay 5
     end
   end
 end

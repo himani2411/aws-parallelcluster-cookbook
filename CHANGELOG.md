@@ -18,6 +18,7 @@ This file is used to list changes made in each version of the AWS ParallelCluste
 
 **CHANGES**
 - Upgrade Slurm to version 25.11.6 (from 25.11.4).
+- Upgrade libjwt to 3.6.1 (from 1.18.4).
 
 **BUG FIXES**
 - Fix cluster creation failure caused by Slurm accounting bootstrap failing when ClusterName is overridden 

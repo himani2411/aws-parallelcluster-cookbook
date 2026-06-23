@@ -14,8 +14,6 @@ end
 
 use 'partial/_jwt_dependencies_common'
 
-# cmake is required by libjwt 2.0+ (CMake build); libssl-dev is already
-# provided by the platform base packages.
 def dependencies
-  %w(libjansson-dev cmake)
+  %w(libjansson-dev)
 end

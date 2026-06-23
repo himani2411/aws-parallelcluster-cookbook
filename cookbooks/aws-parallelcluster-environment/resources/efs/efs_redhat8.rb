@@ -60,6 +60,7 @@ action :install_efs_utils do
     end
 
     bash "install efs utils" do
+      environment 'HOME' => '/root'
       cwd node['cluster']['sources_dir']
       code adc_install_script_code(efs_utils_tarball, package_name, package_version)
     end
@@ -67,6 +68,7 @@ action :install_efs_utils do
   else
     # Install EFS Utils following https://docs.aws.amazon.com/efs/latest/ug/installing-amazon-efs-utils.html
     bash "install efs utils" do
+      environment 'HOME' => '/root'
       cwd node['cluster']['sources_dir']
       code install_script_code(efs_utils_tarball, package_name, package_version)
     end

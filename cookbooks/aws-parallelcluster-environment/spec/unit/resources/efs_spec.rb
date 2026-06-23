@@ -26,7 +26,7 @@ describe 'efs:install_utils' do
   # The rustup prereq resource's not_if runs a shell command; ChefSpec blocks
   # real execution, so stub it. false => installed Rust is too old => rustup runs.
   before do
-    stub_command("source \"$HOME/.cargo/env\" 2>/dev/null && rustc --version | awk '{print $2}' | awk -F. '{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }'").and_return(false)
+    stub_command("source \"/root/.cargo/env\" 2>/dev/null && rustc --version | awk '{print $2}' | awk -F. '{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }'").and_return(false)
   end
 
   for_oses([

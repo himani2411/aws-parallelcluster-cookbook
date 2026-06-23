@@ -27,15 +27,18 @@ action :install_utils do
     packages prerequisites
   end
 
-  # Install Rust via rustup to get a version new enough for efs-utils (>= 1.91.1)
+  # Install Rust via rustup to get a version new enough for efs-utils (>= 1.91.1).
+  # HOME is set explicitly: Chef's bash resource runs without it, so rustup's
+  # "$HOME/.cargo/env" would otherwise resolve to "/.cargo/env" and fail.
   bash 'install rust via rustup' do
+    environment 'HOME' => '/root'
     code <<-RUSTUP
       set -e
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
       . "$HOME/.cargo/env"
       rustc --version
     RUSTUP
-    not_if 'source "$HOME/.cargo/env" 2>/dev/null && rustc --version | awk \'{print $2}\' | awk -F. \'{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }\''
+    not_if 'source "/root/.cargo/env" 2>/dev/null && rustc --version | awk \'{print $2}\' | awk -F. \'{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }\''
   end
 
   directory node['cluster']['sources_dir'] do
@@ -75,6 +78,7 @@ action :install_efs_utils do
   efs_utils_tarball = "#{node['cluster']['sources_dir']}/efs-utils-#{package_version}.tar.gz"
   # Install EFS Utils following https://docs.aws.amazon.com/efs/latest/ug/installing-amazon-efs-utils.html
   bash "install efs utils" do
+    environment 'HOME' => '/root'
     cwd node['cluster']['sources_dir']
     code install_script_code(efs_utils_tarball, package_name, package_version)
   end

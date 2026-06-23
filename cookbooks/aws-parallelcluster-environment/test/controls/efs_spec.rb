@@ -4,16 +4,18 @@ control 'tag:install_efs_utils_installed' do
 
   only_if { !os_properties.redhat_on_docker? }
 
-  describe file("#{node['cluster']['sources_dir']}/efs-utils-#{node['cluster']['efs']['version']}.tar.gz") do
-    it { should exist }
-    its('sha256sum') { should eq node['cluster']['efs']['sha256'] }
-    its('owner') { should eq 'root' }
-    its('group') { should eq 'root' }
-    its('mode') { should cmp '0644' }
-  end unless os_properties.alinux?
-
+  # efs-utils is installed as a pre-built package from the EFS repo, pinned to
+  # the requested version.
   describe package('amazon-efs-utils') do
     it { should be_installed }
+    its('version') { should include node['cluster']['efs']['version'] }
+  end
+
+  # mount.efs reports the installed efs-utils version, e.g.
+  # "/usr/sbin/mount.efs Version: 3.1.3".
+  describe command('mount.efs --version') do
+    its('exit_status') { should eq 0 }
+    its('stdout') { should include node['cluster']['efs']['version'] }
   end
 
   describe file("/etc/amazon/efs/efs-utils.conf") do

@@ -23,121 +23,10 @@ def mock_already_installed(package, expected_version, installed)
 end
 
 describe 'efs:install_utils' do
-  # The rustup prereq resource's not_if runs a shell command; ChefSpec blocks
-  # real execution, so stub it. false => installed Rust is too old => rustup runs.
-  before do
-    stub_command("source \"/root/.cargo/env\" 2>/dev/null && rustc --version | awk '{print $2}' | awk -F. '{ if ($1 > 1 || ($1 == 1 && $2 >= 91)) exit 0; else exit 1 }'").and_return(false)
-  end
+  cached(:utils_version) { '1.2.3' }
+  cached(:efs_domain) { 'https://amazon-efs-utils.aws.com' }
 
-  for_oses([
-             %w(ubuntu 24.04),
-             %w(ubuntu 22.04),
-           ]) do |platform, version|
-    context "on #{platform}#{version}" do
-      cached(:source_dir) { 'SOURCE DIR' }
-      cached(:utils_version) { '1.2.3' }
-      cached(:tarball_path) { "#{source_dir}/efs-utils-#{utils_version}.tar.gz" }
-      cached(:tarball_url) { "https://#{aws_region}-aws-parallelcluster.s3.#{aws_region}.test_aws_domain/archives/dependencies/efs/v#{utils_version}.tar.gz" }
-      cached(:tarball_checksum) { 'TARBALL CHECKSUM' }
-      cached(:bash_code) do
-        <<-EFSUTILSINSTALL
-      set -e
-      . "$HOME/.cargo/env"
-      tar xf #{tarball_path}
-      cd efs-utils-#{utils_version}
-      ./build-deb.sh
-      apt-get -y install ./build/amazon-efs-utils*deb
-        EFSUTILSINSTALL
-      end
-
-      context "utils package not yet installed" do
-        cached(:chef_run) do
-          mock_already_installed('amazon-efs-utils', utils_version, false)
-          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
-            node.override['cluster']['efs_utils']['tarball_path'] = tarball_path
-            node.override['cluster']['sources_dir'] = source_dir
-            node.override['cluster']['region'] = aws_region
-            node.override['cluster']['efs']['version'] = utils_version
-            node.override['cluster']['efs']['sha256'] = tarball_checksum
-          end
-          ConvergeEfs.install_utils(runner)
-        end
-        cached(:node) { chef_run.node }
-
-        it 'creates sources dir' do
-          is_expected.to create_directory(source_dir).with_recursive(true)
-        end
-
-        it 'updates package repos' do
-          is_expected.to update_package_repos('update package repositories')
-        end
-
-        it 'downloads tarball' do
-          is_expected.to create_if_missing_remote_file(tarball_path)
-            .with(source: tarball_url)
-            .with(mode: '0644')
-            .with(retries: 3)
-            .with(retry_delay: 5)
-            .with(checksum: tarball_checksum)
-        end
-
-        it 'installs rust via rustup' do
-          is_expected.to run_bash('install rust via rustup')
-        end
-
-        it 'installs package from downloaded tarball' do
-          is_expected.to run_bash('install efs utils')
-            .with(cwd: source_dir)
-            .with(code: bash_code)
-        end
-      end
-
-      context "when base_url is overridden via ExtraChefAttributes" do
-        cached(:public_base_url) { 'https://fake-public.example.DOMAIN/aws/efs-utils/archive' }
-
-        cached(:chef_run) do
-          mock_already_installed('amazon-efs-utils', utils_version, false)
-          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
-            node.override['cluster']['efs_utils']['tarball_path'] = tarball_path
-            node.override['cluster']['sources_dir'] = source_dir
-            node.override['cluster']['region'] = aws_region
-            node.override['cluster']['efs']['version'] = utils_version
-            node.override['cluster']['efs']['sha256'] = tarball_checksum
-            node.override['cluster']['efs']['base_url'] = public_base_url
-          end
-          ConvergeEfs.install_utils(runner)
-        end
-
-        it 'downloads tarball from overridden base_url' do
-          is_expected.to create_if_missing_remote_file(tarball_path)
-            .with(source: "#{public_base_url}/v#{utils_version}.tar.gz")
-        end
-      end
-
-      context "utils package already installed" do
-        cached(:chef_run) do
-          mock_already_installed('amazon-efs-utils', utils_version, true)
-          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
-            node.override['cluster']['efs_utils']['tarball_path'] = tarball_path
-            node.override['cluster']['sources_dir'] = source_dir
-            node.override['cluster']['efs']['version'] = utils_version
-            node.override['cluster']['efs']['sha256'] = tarball_checksum
-          end
-          ConvergeEfs.install_utils(runner)
-        end
-        cached(:node) { chef_run.node }
-
-        it 'does not download tarball' do
-          is_expected.not_to create_if_missing_remote_file(tarball_path)
-        end
-
-        it 'does not install package from downloaded tarball' do
-          is_expected.not_to run_bash('install efs utils')
-        end
-      end
-    end
-  end
-
+  # RHEL/Rocky: install the pinned amazon-efs-utils RPM from the EFS yum repo.
   for_oses([
     %w(redhat 8),
     %w(rocky 8),
@@ -145,71 +34,27 @@ describe 'efs:install_utils' do
     %w(rocky 9),
   ]) do |platform, version|
     context "on #{platform}#{version}" do
-      cached(:source_dir) { 'SOURCE DIR' }
-      cached(:utils_version) { '1.2.3' }
-      cached(:tarball_path) { "#{source_dir}/efs-utils-#{utils_version}.tar.gz" }
-      cached(:tarball_url) { "https://#{aws_region}-aws-parallelcluster.s3.#{aws_region}.test_aws_domain/archives/dependencies/efs/v#{utils_version}.tar.gz" }
-      cached(:tarball_checksum) { 'TARBALL CHECKSUM' }
-      cached(:bash_code) do
-        <<-EFSUTILSINSTALL
-      set -e
-      . "$HOME/.cargo/env"
-      tar xf #{tarball_path}
-      cd efs-utils-#{utils_version}
-      make rpm
-      yum -y install ./build/amazon-efs-utils*rpm
-        EFSUTILSINSTALL
-      end
-      cached(:required_packages) do
-        {
-          "redhat" => %w(rpm-build make go openssl-devel cmake3 perl),
-          "rocky" => %w(rpm-build make go openssl-devel cmake3 perl),
-        }
-      end
+      cached(:repo_base_url) { "#{efs_domain}/repo/rpm/redhat/#{version.to_i}.*" }
 
       context "utils package not yet installed" do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, false)
           runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
-            node.override['cluster']['efs_utils']['tarball_path'] = tarball_path
-            node.override['cluster']['sources_dir'] = source_dir
             node.override['cluster']['efs']['version'] = utils_version
-            node.override['cluster']['efs']['sha256'] = tarball_checksum
-            node.override['cluster']['region'] = aws_region
           end
           ConvergeEfs.install_utils(runner)
         end
 
-        it 'creates sources dir' do
-          is_expected.to create_directory(source_dir).with_recursive(true)
+        it 'adds the efs-utils yum repository' do
+          is_expected.to create_yum_repository('efs-utils')
+            .with(baseurl: repo_base_url)
+            .with(gpgkey: "#{efs_domain}/efs-utils-armored.gpg")
         end
 
-        it 'updates package repos' do
-          is_expected.to update_package_repos('update package repositories')
-        end
-
-        it 'installs prerequisites' do
-          is_expected.to install_robust_package('install efs-utils prerequisites')
-            .with(packages: required_packages[platform])
-        end
-
-        it 'installs rust via rustup' do
-          is_expected.to run_bash('install rust via rustup')
-        end
-
-        it 'downloads tarball' do
-          is_expected.to create_if_missing_remote_file(tarball_path)
-            .with(source: tarball_url)
-            .with(mode: '0644')
+        it 'installs the pinned amazon-efs-utils package' do
+          is_expected.to install_package("amazon-efs-utils-#{utils_version}")
             .with(retries: 3)
             .with(retry_delay: 5)
-            .with(checksum: tarball_checksum)
-        end
-
-        it 'installs package from downloaded tarball' do
-          is_expected.to run_bash('install efs utils')
-            .with(cwd: source_dir)
-            .with(code: bash_code)
         end
       end
 
@@ -217,20 +62,66 @@ describe 'efs:install_utils' do
         cached(:chef_run) do
           mock_already_installed('amazon-efs-utils', utils_version, true)
           runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
-            node.override['cluster']['efs_utils']['tarball_path'] = tarball_path
             node.override['cluster']['efs']['version'] = utils_version
-            node.override['cluster']['efs']['sha256'] = tarball_checksum
-            node.override['cluster']['sources_dir'] = source_dir
           end
           ConvergeEfs.install_utils(runner)
         end
 
-        it 'does not download tarball' do
-          is_expected.not_to create_if_missing_remote_file(tarball_path)
+        it 'does not add the efs-utils repository' do
+          is_expected.not_to create_yum_repository('efs-utils')
         end
 
-        it 'does not install package from downloaded tarball' do
-          is_expected.not_to run_bash('install efs utils')
+        it 'does not install the package' do
+          is_expected.not_to install_package("amazon-efs-utils-#{utils_version}")
+        end
+      end
+    end
+  end
+
+  # Ubuntu: install the pinned amazon-efs-utils deb from the EFS apt repo.
+  for_oses([
+    %w(ubuntu 22.04),
+    %w(ubuntu 24.04),
+  ]) do |platform, version|
+    context "on #{platform}#{version}" do
+      context "utils package not yet installed" do
+        cached(:chef_run) do
+          mock_already_installed('amazon-efs-utils', utils_version, false)
+          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
+            node.override['cluster']['efs']['version'] = utils_version
+          end
+          ConvergeEfs.install_utils(runner)
+        end
+
+        it 'adds the efs-utils apt repository' do
+          is_expected.to add_apt_repository('efs-utils')
+            .with(uri: "#{efs_domain}/repo/deb/ubuntu")
+            .with(distribution: version)
+            .with(key: ["#{efs_domain}/efs-utils.gpg"])
+        end
+
+        it 'installs the pinned amazon-efs-utils package keeping the existing conf' do
+          is_expected.to install_package('amazon-efs-utils')
+            .with(version: "#{utils_version}-1")
+            .with(options: ['-o', 'Dpkg::Options::=--force-confold', '-o', 'Dpkg::Options::=--force-confdef'])
+        end
+      end
+
+      context "utils package already installed" do
+        cached(:chef_run) do
+          mock_already_installed('amazon-efs-utils', utils_version, true)
+          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
+            node.override['cluster']['efs']['version'] = utils_version
+          end
+          ConvergeEfs.install_utils(runner)
+        end
+
+        it 'does not add the efs-utils repository' do
+          is_expected.not_to add_apt_repository('efs-utils')
+        end
+
+        it 'does not install the package' do
+          is_expected.not_to install_package('amazon-efs-utils')
         end
       end
     end

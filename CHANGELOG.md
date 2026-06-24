@@ -19,6 +19,7 @@ This file is used to list changes made in each version of the AWS ParallelCluste
 **CHANGES**
 - Upgrade Slurm to version 25.11.6 (from 25.11.4).
 - Install amazon-efs-utils from the official EFS package repository instead of building from source, so efs-utils 3.x no longer requires a Rust toolchain newer than the OS provides.
+- Install the aws-parallelcluster-node package from S3 in all regions instead of PyPI, to support air-gapped and proxied environments.
 
 **BUG FIXES**
 - Fix cluster creation failure caused by Slurm accounting bootstrap failing when ClusterName is overridden 
@@ -31,6 +32,7 @@ via custom Slurm settings or the cluster name contains upper-case letters.
 - Fix compute node bootstrap hanging without a clear error when the compute subnet cannot reach DynamoDB.
 - Fix login nodes not mounting `/opt/parallelcluster/shared` when EFS is used as the internal shared storage type.
 - Fix SELinux not actually being disabled on RHEL-family OSes (kernels >= 6.4) due to a [deprecated mechanism](https://github.com/SELinuxProject/selinux-kernel/wiki/DEPRECATE-runtime-disable) being silently ignored by newer kernels.
+- Fix `build-image` failure by skipping installation of `gdrcopy` and `dcgm` if parent image has an existing installed version.
 
 **DEPRECATIONS**
 - Amazon Linux 2 is no longer supported.

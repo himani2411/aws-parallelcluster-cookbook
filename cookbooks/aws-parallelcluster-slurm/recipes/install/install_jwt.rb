@@ -31,6 +31,9 @@ end
 jwt_dependencies 'Install jwt dependencies'
 
 # libjwt 2.0+ builds with CMake (the autotools build was dropped upstream).
+# Pin CMAKE_INSTALL_LIBDIR=lib: GNUInstallDirs would otherwise install libjwt.so
+# under a multiarch dir (e.g. lib/x86_64-linux-gnu), which Slurm's
+# --with-jwt=/opt/libjwt does not search, failing with "unable to locate jwt library".
 bash 'libjwt' do
   user 'root'
   group 'root'
@@ -41,7 +44,7 @@ bash 'libjwt' do
     cd libjwt-#{jwt_version}
     mkdir build
     cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DCMAKE_INSTALL_LIBDIR=lib -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF
     make -j $(grep -c processor /proc/cpuinfo)
     make install
   LIBJWT

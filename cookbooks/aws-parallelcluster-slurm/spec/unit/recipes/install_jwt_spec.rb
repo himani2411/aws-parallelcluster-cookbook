@@ -57,7 +57,7 @@ describe 'aws-parallelcluster-slurm::install_jwt' do
             expect(bash_resource.user).to eq('root')
             expect(bash_resource.group).to eq('root')
             expect(bash_resource.code).to include("tar xf #{cluster_sources_dir}/libjwt-#{jwt_version}.tar.gz --no-same-owner")
-            expect(bash_resource.code).to include('cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF')
+            expect(bash_resource.code).to include('cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DCMAKE_INSTALL_LIBDIR=lib -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF')
             expect(bash_resource.code).to include('make -j')
             expect(bash_resource.code).to include('make install')
             expect(bash_resource.code).not_to include('autoreconf')

@@ -28,8 +28,10 @@ action :install_utils do
   # Do not install efs-utils if a same or newer version is already installed.
   return if already_installed?("amazon-efs-utils", package_version)
 
+  # The repo path includes the version (repo/deb/ubuntu/<version>/dists/<version>/...);
+  # both the uri and the suite carry it, matching efs-utils-installer.sh.
   apt_repository "efs-utils" do
-    uri "#{efs_domain}/repo/deb/ubuntu"
+    uri "#{efs_domain}/repo/deb/ubuntu/#{node['platform_version']}"
     distribution node['platform_version']
     components ['main']
     key "#{efs_domain}/efs-utils.gpg"

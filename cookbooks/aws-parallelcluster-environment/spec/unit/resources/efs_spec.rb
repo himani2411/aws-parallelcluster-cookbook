@@ -95,7 +95,7 @@ describe 'efs:install_utils' do
 
         it 'adds the efs-utils apt repository' do
           is_expected.to add_apt_repository('efs-utils')
-            .with(uri: "#{efs_domain}/repo/deb/ubuntu")
+            .with(uri: "#{efs_domain}/repo/deb/ubuntu/#{version}")
             .with(distribution: version)
             .with(key: ["#{efs_domain}/efs-utils.gpg"])
         end

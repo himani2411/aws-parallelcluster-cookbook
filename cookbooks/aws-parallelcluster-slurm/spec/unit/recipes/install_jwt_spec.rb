@@ -52,21 +52,15 @@ describe 'aws-parallelcluster-slurm::install_jwt' do
             )
           end
 
-          it 'installs libjwt' do
-            is_expected.to run_bash('libjwt').with(
-              user: 'root',
-              group: 'root',
-              code: <<-CODE
-    set -e
-    tar xf #{"#{cluster_sources_dir}/libjwt-#{jwt_version}.tar.gz"} --no-same-owner
-    cd libjwt-#{jwt_version}
-    autoreconf --force --install
-    ./configure --prefix=/opt/libjwt
-    CORES=$(grep processor /proc/cpuinfo | wc -l)
-    make -j $CORES
-    sudo make install
-              CODE
-            )
+          it 'installs libjwt with CMake' do
+            bash_resource = chef_run.find_resource('bash', 'libjwt')
+            expect(bash_resource.user).to eq('root')
+            expect(bash_resource.group).to eq('root')
+            expect(bash_resource.code).to include("tar xf #{cluster_sources_dir}/libjwt-#{jwt_version}.tar.gz --no-same-owner")
+            expect(bash_resource.code).to include('cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF')
+            expect(bash_resource.code).to include('make -j')
+            expect(bash_resource.code).to include('make install')
+            expect(bash_resource.code).not_to include('autoreconf')
           end
         end
       end

@@ -18,7 +18,6 @@ This file is used to list changes made in each version of the AWS ParallelCluste
 
 **CHANGES**
 - Upgrade Slurm to version 25.11.6 (from 25.11.4).
-- Upgrade libjwt to 3.6.1 (from 1.18.4).
 - Install amazon-efs-utils from the official EFS package repository instead of building from source, so efs-utils 3.x no longer requires a Rust toolchain newer than the OS provides.
 - Install the aws-parallelcluster-node package from S3 in all regions instead of PyPI, to support air-gapped and proxied environments.
 

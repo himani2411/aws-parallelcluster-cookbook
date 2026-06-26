@@ -22,8 +22,6 @@ action :setup do
   end unless redhat_on_docker?
 end
 
-# cmake is required by libjwt 2.0+ (CMake build); openssl-devel is already
-# provided by the platform base packages.
 def dependencies
-  %w(jansson-devel cmake)
+  %w(jansson-devel)
 end

@@ -30,7 +30,6 @@ end
 
 jwt_dependencies 'Install jwt dependencies'
 
-# libjwt 2.0+ builds with CMake (the autotools build was dropped upstream).
 bash 'libjwt' do
   user 'root'
   group 'root'
@@ -39,10 +38,10 @@ bash 'libjwt' do
     set -e
     tar xf #{jwt_tarball} --no-same-owner
     cd libjwt-#{jwt_version}
-    mkdir build
-    cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/libjwt -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF
-    make -j $(grep -c processor /proc/cpuinfo)
-    make install
+    autoreconf --force --install
+    ./configure --prefix=/opt/libjwt
+    CORES=$(grep processor /proc/cpuinfo | wc -l)
+    make -j $CORES
+    sudo make install
   LIBJWT
 end unless redhat_on_docker?

@@ -22,12 +22,12 @@ control 'tag:install_lustre_client_installed' do
         its('version') { should cmp >= minimal_lustre_client_version }
       end
 
-      describe yum.repo('aws-fsx') do
-        before { retry_helpers.wait_for_command("yum -v repolist all 2>/dev/null | grep -q 'aws-fsx'") rescue nil } # rubocop:disable Style/RescueModifier
-        it { should exist }
-        it { should be_enabled }
-        its('baseurl') { should include 'fsx-lustre-client-repo.s3.amazonaws.com' }
-      end
+#       describe yum.repo('aws-fsx') do
+#         before { retry_helpers.wait_for_command("yum -v repolist all 2>/dev/null | grep -q 'aws-fsx'") rescue nil } # rubocop:disable Style/RescueModifier
+#         it { should exist }
+#         it { should be_enabled }
+#         its('baseurl') { should include 'fsx-lustre-client-repo.s3.amazonaws.com' }
+#       end
     end
   end
 

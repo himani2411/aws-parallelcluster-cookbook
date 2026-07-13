@@ -13,20 +13,13 @@
 # This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-# Install amazon-efs-utils from the official EFS apt repository (the same repo
-# set up by https://amazon-efs-utils.aws.com/efs-utils-installer.sh) instead of
-# building from source. v3+ builds need a Rust toolchain newer than the OS ships;
-# the pre-built package side-steps that entirely.
-
-def efs_domain
-  "https://amazon-efs-utils.aws.com"
-end
+# Install amazon-efs-utils from the EFS apt repo instead of building from source.
 
 action :install_utils do
-  package_version = _efs_utils_version
+  return if _skip_efs_utils_install?
 
   # Do not install efs-utils if a same or newer version is already installed.
-  return if already_installed?("amazon-efs-utils", package_version)
+  return if already_installed?("amazon-efs-utils", _efs_utils_version)
 
   # The repo path includes the version (repo/deb/ubuntu/<version>/dists/<version>/...);
   # both the uri and the suite carry it, matching efs-utils-installer.sh.
@@ -41,11 +34,10 @@ action :install_utils do
 
   apt_update
 
-  # --force-confold/-confdef keep our customized /etc/amazon/efs/efs-utils.conf
-  # on upgrade; without them dpkg prompts interactively and aborts on EOF.
-  package "amazon-efs-utils" do
-    version "#{package_version}-1"
-    options '-o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef"'
+  # "=3.*" caps the major (apt picks the newest match). --force-confold/-confdef
+  # keep our efs-utils.conf on upgrade; without them dpkg prompts and aborts on EOF.
+  execute "install amazon-efs-utils" do
+    command "apt-get install -y -o Dpkg::Options::=\"--force-confold\" -o Dpkg::Options::=\"--force-confdef\" 'amazon-efs-utils=#{_efs_utils_major}.*'"
     retries 3
     retry_delay 5
   end

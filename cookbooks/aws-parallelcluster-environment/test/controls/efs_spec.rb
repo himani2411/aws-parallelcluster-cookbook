@@ -2,20 +2,22 @@
 control 'tag:install_efs_utils_installed' do
   title 'Verify that efs_utils is installed'
 
-  only_if { !os_properties.redhat_on_docker? }
+  only_if { !os_properties.redhat_on_docker? && !node['cluster']['efs']['skip_install'] }
 
-  # efs-utils is installed as a pre-built package from the EFS repo, pinned to
-  # the requested version.
+  # The commercial repo installs the newest release within the tracked major, so
+  # assert the major line rather than the exact efs.version pin.
+  efs_major = node['cluster']['efs']['version'].split('.').first
+
   describe package('amazon-efs-utils') do
     it { should be_installed }
-    its('version') { should include node['cluster']['efs']['version'] }
+    its('version') { should start_with(efs_major) }
   end
 
   # mount.efs reports the installed efs-utils version, e.g.
   # "/usr/sbin/mount.efs Version: 3.1.3".
   describe command('mount.efs --version') do
     its('exit_status') { should eq 0 }
-    its('stdout') { should include node['cluster']['efs']['version'] }
+    its('stdout') { should match(/Version:\s*#{efs_major}\./) }
   end
 
   describe file("/etc/amazon/efs/efs-utils.conf") do

@@ -23,7 +23,8 @@ def mock_already_installed(package, expected_version, installed)
 end
 
 describe 'efs:install_utils' do
-  cached(:utils_version) { '1.2.3' }
+  cached(:utils_version) { '9.8.7' }
+  cached(:utils_major) { utils_version.split('.').first.to_i }
   cached(:efs_domain) { 'https://amazon-efs-utils.aws.com' }
 
   # RHEL/Rocky: install the pinned amazon-efs-utils RPM from the EFS yum repo.
@@ -51,8 +52,9 @@ describe 'efs:install_utils' do
             .with(gpgkey: "#{efs_domain}/efs-utils-armored.gpg")
         end
 
-        it 'installs the pinned amazon-efs-utils package' do
-          is_expected.to install_package("amazon-efs-utils-#{utils_version}")
+        it 'installs the newest amazon-efs-utils within the tracked major' do
+          is_expected.to run_execute('install amazon-efs-utils')
+            .with(command: "dnf install -y 'amazon-efs-utils < #{utils_major + 1}'")
             .with(retries: 3)
             .with(retry_delay: 5)
         end
@@ -72,13 +74,69 @@ describe 'efs:install_utils' do
         end
 
         it 'does not install the package' do
-          is_expected.not_to install_package("amazon-efs-utils-#{utils_version}")
+          is_expected.not_to run_execute('install amazon-efs-utils')
+        end
+      end
+
+      # ADC (us-iso): the per-region S3 bucket is a raw package drop, not a served
+      # yum repo, so download the RPM and install the local file instead.
+      context "in an ADC (us-iso) region" do
+        cached(:iso_region) { 'us-iso-test-1' }
+        cached(:iso_domain) { 'test.aws.domain' }
+        cached(:sources_dir) { '/fake/sources' }
+        cached(:rpm_file) { "amazon-efs-utils-#{utils_version}-1.x86_64.rpm" }
+        cached(:rpm_url) do
+          "https://s3-efs-utils-mvp-prod-#{iso_region}.s3.#{iso_region}.#{iso_domain}/#{rpm_file}"
+        end
+        cached(:chef_run) do
+          mock_already_installed('amazon-efs-utils', utils_version, false)
+          allow_any_instance_of(Object).to receive(:aws_region).and_return(iso_region)
+          allow_any_instance_of(Object).to receive(:aws_domain).and_return(iso_domain)
+          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
+            node.override['cluster']['efs']['version'] = utils_version
+            node.override['cluster']['sources_dir'] = sources_dir
+          end
+          ConvergeEfs.install_utils(runner)
+        end
+
+        it 'does not add a yum repository' do
+          is_expected.not_to create_yum_repository('efs-utils')
+        end
+
+        it 'downloads the RPM from the EFS per-region S3 bucket' do
+          is_expected.to create_if_missing_remote_file("#{sources_dir}/#{rpm_file}")
+            .with(source: rpm_url)
+        end
+
+        it 'installs the downloaded RPM locally' do
+          is_expected.to run_bash('install amazon-efs-utils from S3 rpm')
+            .with(code: "yum install -y ./#{rpm_file}")
         end
       end
     end
   end
 
-  # Ubuntu: install the pinned amazon-efs-utils deb from the EFS apt repo.
+  # Amazon Linux 2023: amazon-efs-utils ships in the OS repo (no EFS repo added).
+  context "on amazon2023" do
+    cached(:chef_run) do
+      mock_already_installed('amazon-efs-utils', utils_version, false)
+      runner = runner(platform: 'amazon', version: '2023', step_into: ['efs']) do |node|
+        node.override['cluster']['efs']['version'] = utils_version
+      end
+      ConvergeEfs.install_utils(runner)
+    end
+
+    it 'does not add an EFS repository' do
+      is_expected.not_to create_yum_repository('efs-utils')
+    end
+
+    it 'installs the newest amazon-efs-utils within the tracked major from the OS repo' do
+      is_expected.to run_execute('install amazon-efs-utils')
+        .with(command: "dnf install -y 'amazon-efs-utils < #{utils_major + 1}'")
+    end
+  end
+
+  # Ubuntu: install amazon-efs-utils deb from the EFS apt repo.
   for_oses([
     %w(ubuntu 22.04),
     %w(ubuntu 24.04),
@@ -100,10 +158,9 @@ describe 'efs:install_utils' do
             .with(key: ["#{efs_domain}/efs-utils.gpg"])
         end
 
-        it 'installs the pinned amazon-efs-utils package keeping the existing conf' do
-          is_expected.to install_package('amazon-efs-utils')
-            .with(version: "#{utils_version}-1")
-            .with(options: ['-o', 'Dpkg::Options::=--force-confold', '-o', 'Dpkg::Options::=--force-confdef'])
+        it 'installs the newest amazon-efs-utils within the tracked major keeping the existing conf' do
+          is_expected.to run_execute('install amazon-efs-utils')
+            .with(command: "apt-get install -y -o Dpkg::Options::=\"--force-confold\" -o Dpkg::Options::=\"--force-confdef\" 'amazon-efs-utils=#{utils_major}.*'")
         end
       end
 
@@ -121,8 +178,57 @@ describe 'efs:install_utils' do
         end
 
         it 'does not install the package' do
-          is_expected.not_to install_package('amazon-efs-utils')
+          is_expected.not_to run_execute('install amazon-efs-utils')
         end
+      end
+    end
+  end
+
+  # DevSetting efs.skip_install so the recipe must install nothing regardless of
+  # OS/repo flavor. It arrives as the string "true"/"false" via ExtraChefAttributes.
+  for_oses([
+    %w(redhat 8),
+    %w(redhat 9),
+    %w(rocky 8),
+    %w(rocky 9),
+    %w(ubuntu 22.04),
+    %w(ubuntu 24.04),
+    %w(amazon 2023),
+  ]) do |platform, version|
+    [true, 'true'].each do |skip_value|
+      context "with efs.skip_install #{skip_value.inspect} on #{platform}#{version}" do
+        cached(:chef_run) do
+          runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
+            node.override['cluster']['efs']['version'] = utils_version
+            node.override['cluster']['efs']['skip_install'] = skip_value
+          end
+          ConvergeEfs.install_utils(runner)
+        end
+
+        it 'does not add any efs-utils repository' do
+          is_expected.not_to create_yum_repository('efs-utils')
+          is_expected.not_to add_apt_repository('efs-utils')
+        end
+
+        it 'does not install amazon-efs-utils' do
+          is_expected.not_to run_execute('install amazon-efs-utils')
+        end
+      end
+    end
+
+    # The string "false" is truthy in Ruby, so it must NOT skip the install.
+    context "with efs.skip_install \"false\" on #{platform}#{version}" do
+      cached(:chef_run) do
+        mock_already_installed('amazon-efs-utils', utils_version, false)
+        runner = runner(platform: platform, version: version, step_into: ['efs']) do |node|
+          node.override['cluster']['efs']['version'] = utils_version
+          node.override['cluster']['efs']['skip_install'] = 'false'
+        end
+        ConvergeEfs.install_utils(runner)
+      end
+
+      it 'still installs amazon-efs-utils' do
+        is_expected.to run_execute('install amazon-efs-utils')
       end
     end
   end

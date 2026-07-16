@@ -11,6 +11,10 @@ def rocky_on_docker?
   on_docker? && platform?('rocky')
 end
 
+def rocky9_on_docker?
+  rocky_on_docker? && node['platform_version'].to_i == 9
+end
+
 def alinux2023_on_docker?
   on_docker? && platform?('amazon') && node['platform_version'].to_i == 2023
 end

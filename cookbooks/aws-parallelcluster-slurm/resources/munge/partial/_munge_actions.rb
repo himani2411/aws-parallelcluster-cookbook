@@ -51,7 +51,7 @@ action :setup do
     action_set_user_and_group
     action_create_required_directories
   }
-  actions.call unless redhat_on_docker?
+  actions.call unless redhat_on_docker? || rocky9_on_docker?
 end
 
 action :purge_packages do

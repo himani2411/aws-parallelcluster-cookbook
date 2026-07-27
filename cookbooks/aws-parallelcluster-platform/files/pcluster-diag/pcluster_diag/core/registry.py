@@ -25,8 +25,11 @@ from pcluster_diag.checks.critical_paths import CriticalPathsHaveExpectedPermiss
 from pcluster_diag.checks.daemon_health import ClusterDaemonsAreRunning, ClustermgtdHeartbeatIsHealthy
 from pcluster_diag.checks.directory_lookup import DirectoryService
 from pcluster_diag.checks.fsx_connectivity import (
+    FsxEfaMountIsHealthy,
     FsxFilesystemsAreReachable,
+    FsxLnetInterfacesAreHealthy,
     FsxMountsArePresent,
+    FsxTargetsAreReachable,
     LustreClientIsInstalled,
 )
 from pcluster_diag.checks.imds import Imds
@@ -146,4 +149,7 @@ DEFAULT_REGISTRY = (
     .register(LustreClientIsInstalled())
     .register(FsxMountsArePresent())
     .register(FsxFilesystemsAreReachable())
+    .register(FsxLnetInterfacesAreHealthy())
+    .register(FsxEfaMountIsHealthy())  # only when EFA-for-Lustre is expected
+    .register(FsxTargetsAreReachable())  # approval_required: heavier per-target probe
 )

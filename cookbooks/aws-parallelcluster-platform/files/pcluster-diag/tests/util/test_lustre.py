@@ -73,3 +73,191 @@ def test_lustre_client_version_none_on_failure(monkeypatch):
     monkeypatch.setattr(kernel_module, "run_command", lambda command: _completed(returncode=1))
 
     assert lustre.lustre_client_version() is None
+
+
+# --- lnetctl net show parsing ---------------------------------------------------------
+
+# `lnetctl net show -v` with a loopback net, a tcp net, and an EFA net (two bound devices) with stats.
+_LNET_NET_SHOW = """\
+net:
+    - net type: lo
+      local NI(s):
+        - nid: 0@lo
+          status: up
+    - net type: tcp
+      local NI(s):
+        - nid: 10.0.0.1@tcp
+          status: up
+          interfaces:
+              0: eth0
+          statistics:
+              send_count: 1200
+              recv_count: 1500
+          health stats:
+              health value: 1000
+    - net type: efa
+      local NI(s):
+        - nid: 10.0.0.1@efa
+          status: up
+          interfaces:
+              0: efa0
+          statistics:
+              send_count: 900
+              recv_count: 800
+          health stats:
+              health value: 1000
+        - nid: 10.0.0.2@efa
+          status: up
+          interfaces:
+              0: efa1
+          statistics:
+              send_count: 0
+              recv_count: 0
+          health stats:
+              health value: 640
+"""
+
+
+def test_parse_lnet_net_show_lists_nets_and_nis():
+    nets = lustre.parse_lnet_net_show(_LNET_NET_SHOW)
+
+    assert [net.net_type for net in nets] == ["lo", "tcp", "efa"]
+    efa = lustre.lnet_net(nets, "efa")
+    assert [ni.nid for ni in efa.local_nis] == ["10.0.0.1@efa", "10.0.0.2@efa"]
+    assert efa.local_nis[0].send_count == 900
+    assert efa.local_nis[1].health_value == 640
+
+
+def test_active_lnds_excludes_loopback():
+    nets = lustre.parse_lnet_net_show(_LNET_NET_SHOW)
+
+    assert lustre.active_lnds(nets) == ["tcp", "efa"]
+
+
+def test_lnet_bound_interfaces_collects_devices():
+    nets = lustre.parse_lnet_net_show(_LNET_NET_SHOW)
+
+    assert lustre.lnet_bound_interfaces(nets, "efa") == ["efa0", "efa1"]
+    assert lustre.lnet_bound_interfaces(nets, "o2ib") == []
+
+
+def test_local_nids_returns_net_nids():
+    nets = lustre.parse_lnet_net_show(_LNET_NET_SHOW)
+
+    assert lustre.local_nids(nets, "efa") == ["10.0.0.1@efa", "10.0.0.2@efa"]
+    assert lustre.local_nids(nets, "o2ib") == []
+
+
+def test_parse_lnet_net_show_empty_on_no_nets():
+    assert lustre.parse_lnet_net_show("net:\n") == []
+
+
+def test_parse_lnet_net_show_empty_on_garbage():
+    assert lustre.parse_lnet_net_show(": : not yaml : :\n- [") == []
+
+
+# --- lnetctl peer show parsing --------------------------------------------------------
+
+_LNET_PEER_SHOW = """\
+peer:
+    - primary nid: 10.0.1.5@efa
+      peer ni:
+        - nid: 10.0.1.5@efa
+        - nid: 10.0.1.5@tcp
+    - primary nid: 10.0.1.6@tcp
+      peer ni:
+        - nid: 10.0.1.6@tcp
+"""
+
+
+def test_parse_lnet_peer_show_collects_nids():
+    nids = lustre.parse_lnet_peer_show(_LNET_PEER_SHOW)
+
+    assert "10.0.1.5@efa" in nids
+    assert "10.0.1.6@tcp" in nids
+
+
+def test_nids_on_net_filters_and_dedupes():
+    nids = lustre.parse_lnet_peer_show(_LNET_PEER_SHOW)
+
+    assert lustre.nids_on_net(nids, "efa") == ["10.0.1.5@efa"]
+
+
+def test_parse_lnet_peer_show_empty_on_garbage():
+    assert lustre.parse_lnet_peer_show("- [") == []
+
+
+# --- lfs check servers parsing --------------------------------------------------------
+
+_LFS_CHECK_SERVERS = """\
+fs-MDT0000-mdc-ffff active.
+fs-OST0000-osc-ffff active.
+check 'fs-OST000b-osc-ffff': Input/output error (5)
+"""
+
+
+def test_parse_lfs_check_servers_classifies_active_and_errored():
+    servers = lustre.parse_lfs_check_servers(_LFS_CHECK_SERVERS)
+
+    assert [s.target for s in servers] == [
+        "fs-MDT0000-mdc-ffff",
+        "fs-OST0000-osc-ffff",
+        "fs-OST000b-osc-ffff",
+    ]
+    assert [s.active for s in servers] == [True, True, False]
+
+
+def test_unreachable_servers_flags_only_errored():
+    unreachable = lustre.unreachable_servers(_LFS_CHECK_SERVERS)
+
+    assert [s.target for s in unreachable] == ["fs-OST000b-osc-ffff"]
+    assert "Input/output error" in unreachable[0].detail
+
+
+def test_unreachable_servers_empty_when_all_active():
+    assert lustre.unreachable_servers("fs-OST0000-osc-ffff active.\n") == []
+
+
+# --- lctl get_param import parsing ----------------------------------------------------
+
+_LCTL_IMPORT = """\
+osc.fs-OST0000-osc-ffff.import=
+    import:
+        target: fs-OST0000_UUID
+        state: FULL
+        connection:
+            current_connection: 10.0.1.5@efa
+            failover_nids: [ 10.0.1.5@efa ]
+mdc.fs-MDT0000-mdc-ffff.import=
+    import:
+        target: fs-MDT0000_UUID
+        state: DISCONN
+        connection:
+            current_connection: 10.0.1.6@tcp
+            failover_nids: [ 10.0.1.7@tcp ]
+"""
+
+
+def test_parse_lctl_import_extracts_state_and_connection():
+    imports = lustre.parse_lctl_import(_LCTL_IMPORT)
+
+    assert [i.param for i in imports] == ["osc.fs-OST0000-osc-ffff", "mdc.fs-MDT0000-mdc-ffff"]
+    assert imports[0].state == "FULL"
+    assert imports[0].healthy is True
+    assert imports[0].current_connection == "10.0.1.5@efa"
+    assert imports[0].connected_over == "efa"
+    assert imports[0].failover_nids == ["10.0.1.5@efa"]
+
+
+def test_parse_lctl_import_flags_non_full_state():
+    imports = lustre.parse_lctl_import(_LCTL_IMPORT)
+
+    mdt = imports[1]
+    assert mdt.state == "DISCONN"
+    assert mdt.healthy is False
+    assert mdt.connected_over == "tcp"
+    assert mdt.failover_nids == ["10.0.1.7@tcp"]
+
+
+def test_parse_lctl_import_empty_when_no_blocks():
+    assert lustre.parse_lctl_import("some noise\nno import here\n") == []

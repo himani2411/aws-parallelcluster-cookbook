@@ -16,8 +16,11 @@ import pytest
 
 from pcluster_diag.checks import fsx_connectivity
 from pcluster_diag.checks.fsx_connectivity import (
+    FsxEfaMountIsHealthy,
     FsxFilesystemsAreReachable,
+    FsxLnetInterfacesAreHealthy,
     FsxMountsArePresent,
+    FsxTargetsAreReachable,
     LustreClientIsInstalled,
 )
 from pcluster_diag.models.context import NodeType
@@ -258,3 +261,401 @@ def test_reachable_aggregates_multiple_mount_failures(monkeypatch):
         FsxFilesystemsAreReachable.LFS_DF_TIMED_OUT.code,
         FsxFilesystemsAreReachable.LFS_DF_FAILED.code,
     ]
+
+
+# --- shared fixtures for the LNet / EFA / target checks -------------------------------
+
+_LNET_TCP_EFA = """\
+net:
+    - net type: lo
+      local NI(s):
+        - nid: 0@lo
+          status: up
+    - net type: tcp
+      local NI(s):
+        - nid: 10.0.0.1@tcp
+          status: up
+          interfaces:
+              0: eth0
+          statistics:
+              send_count: 100
+              recv_count: 100
+          health stats:
+              health value: 1000
+    - net type: efa
+      local NI(s):
+        - nid: 10.0.0.1@efa
+          status: up
+          interfaces:
+              0: efa0
+          statistics:
+              send_count: 900
+              recv_count: 800
+          health stats:
+              health value: 1000
+"""
+
+_LNET_TCP_ONLY = """\
+net:
+    - net type: lo
+      local NI(s):
+        - nid: 0@lo
+          status: up
+    - net type: tcp
+      local NI(s):
+        - nid: 10.0.0.1@tcp
+          status: up
+          interfaces:
+              0: eth0
+          statistics:
+              send_count: 100
+              recv_count: 100
+          health stats:
+              health value: 1000
+"""
+
+_LNET_EFA_UNDERBOUND = """\
+net:
+    - net type: efa
+      local NI(s):
+        - nid: 10.0.0.1@efa
+          status: up
+          interfaces:
+              0: efa0
+          statistics:
+              send_count: 900
+              recv_count: 800
+          health stats:
+              health value: 1000
+"""
+
+_LNET_EFA_NO_TRAFFIC = """\
+net:
+    - net type: efa
+      local NI(s):
+        - nid: 10.0.0.1@efa
+          status: up
+          interfaces:
+              0: efa0
+          statistics:
+              send_count: 0
+              recv_count: 0
+          health stats:
+              health value: 1000
+        - nid: 10.0.0.2@efa
+          status: up
+          interfaces:
+              0: efa1
+          statistics:
+              send_count: 10
+              recv_count: 10
+          health stats:
+              health value: 1000
+"""
+
+_LNET_PEER_EFA = """\
+peer:
+    - primary nid: 10.0.1.5@efa
+      peer ni:
+        - nid: 10.0.1.5@efa
+"""
+
+_IMPORT_EFA = """\
+osc.fs-OST0000-osc-ffff.import=
+    import:
+        target: fs-OST0000_UUID
+        state: FULL
+        connection:
+            current_connection: 10.0.1.5@efa
+            failover_nids: [ 10.0.1.5@efa ]
+"""
+
+_IMPORT_TCP_FALLBACK = """\
+osc.fs-OST0000-osc-ffff.import=
+    import:
+        target: fs-OST0000_UUID
+        state: FULL
+        connection:
+            current_connection: 10.0.1.5@tcp
+            failover_nids: [ 10.0.1.5@tcp ]
+"""
+
+_IMPORT_DISCONN = """\
+osc.fs-OST0000-osc-ffff.import=
+    import:
+        target: fs-OST0000_UUID
+        state: DISCONN
+        connection:
+            current_connection: 10.0.1.5@efa
+            failover_nids: [ 10.0.1.5@efa ]
+"""
+
+_LFS_CHECK_HEALTHY = "fs-OST0000-osc-ffff active.\nfs-MDT0000-mdc-ffff active.\n"
+_LFS_CHECK_BAD = "fs-OST0000-osc-ffff active.\ncheck 'fs-OST000b-osc-ffff': Input/output error (5)\n"
+
+
+def _route_time_command(monkeypatch, routes, default=None):
+    """Patch fsx_connectivity.time_command to dispatch by a substring match on the joined command.
+
+    ``routes`` maps a substring (e.g. "net show", "peer show", "lfs check") to the TimedCommand to
+    return. The first matching route wins; ``default`` (or a zero-exit empty result) is used otherwise.
+    """
+
+    def fake_time_command(command, timeout):
+        joined = " ".join(command)
+        for needle, timed in routes.items():
+            if needle in joined:
+                return timed
+        return default if default is not None else _timed()
+
+    monkeypatch.setattr(fsx_connectivity, "time_command", fake_time_command)
+
+
+# --- FsxLnetInterfacesAreHealthy ------------------------------------------------------
+
+
+def test_lnet_description():
+    assert "LNet" in FsxLnetInterfacesAreHealthy().description
+
+
+def test_lnet_reports_active_lnds_and_passes(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+
+    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.PASSED
+    active_info = next(i for i in result.infos if i.code == FsxLnetInterfacesAreHealthy.ACTIVE_LNDS.code)
+    assert "tcp" in active_info.message and "efa" in active_info.message
+    # loopback is not reported as an active transport
+    assert "lo" not in active_info.message.split("transports:")[1]
+
+
+def test_lnet_no_nets_fails(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(stdout="net:\n")})
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+
+    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert _codes(result) == [FsxLnetInterfacesAreHealthy.LNET_NOT_CONFIGURED.code]
+
+
+def test_lnet_timeout_fails_with_timeout_code(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(returncode=None, timed_out=True, elapsed=15.0)})
+
+    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert _codes(result) == [FsxLnetInterfacesAreHealthy.LNETCTL_TIMED_OUT.code]
+
+
+def test_lnet_health_decay_is_warning(monkeypatch):
+    decayed = _LNET_EFA_NO_TRAFFIC.replace("health value: 1000", "health value: 500", 1)
+    _route_time_command(monkeypatch, {"net show": _timed(stdout=decayed)})
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+
+    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.WARNING
+    assert _warn_codes(result) == [FsxLnetInterfacesAreHealthy.HEALTH_DEGRADED.code]
+
+
+def test_lnet_reports_persistent_conf_present(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: True)
+
+    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.HEAD))
+
+    assert result.status is Status.PASSED
+    assert FsxLnetInterfacesAreHealthy.PERSISTENT_CONF_PRESENT.code in _info_codes(result)
+
+
+# --- FsxEfaMountIsHealthy -------------------------------------------------------------
+
+
+def test_efa_description():
+    assert "EFA" in FsxEfaMountIsHealthy().description
+
+
+def test_efa_should_run_false_without_efa_net(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_ONLY)})
+
+    assert FsxEfaMountIsHealthy().should_run(sample_context_with_lustre(NodeType.COMPUTE)) is False
+
+
+def test_efa_should_run_false_without_lustre(monkeypatch):
+    assert FsxEfaMountIsHealthy().should_run(sample_context(NodeType.HEAD)) is False
+
+
+def test_efa_should_run_true_with_efa_net(monkeypatch):
+    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
+
+    assert FsxEfaMountIsHealthy().should_run(sample_context_with_lustre(NodeType.COMPUTE)) is True
+
+
+def test_efa_all_bound_and_pinging_passes(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_TCP_EFA),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ping ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.PASSED
+    assert FsxEfaMountIsHealthy.BOUND_DEVICES.code in _info_codes(result)
+
+
+def test_efa_underbound_devices_fails(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_EFA_UNDERBOUND),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ping ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 16)
+
+    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert FsxEfaMountIsHealthy.UNDERBOUND_DEVICES.code in _codes(result)
+    assert "1 of 16" in _messages(result)
+
+
+def test_efa_ping_failure_points_at_security_group(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_TCP_EFA),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(returncode=1, stderr="cannot reach"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert FsxEfaMountIsHealthy.EFA_PING_FAILED.code in _codes(result)
+    assert "security group" in _messages(result)
+
+
+def test_efa_no_traffic_is_warning(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_EFA_NO_TRAFFIC),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 2)
+
+    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.WARNING
+    assert FsxEfaMountIsHealthy.NO_TRAFFIC.code in _warn_codes(result)
+
+
+def test_efa_tcp_fallback_is_warning(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_TCP_EFA),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ok"),
+            "import": _timed(stdout=_IMPORT_TCP_FALLBACK),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.WARNING
+    assert FsxEfaMountIsHealthy.TCP_FALLBACK.code in _warn_codes(result)
+
+
+# --- FsxTargetsAreReachable -----------------------------------------------------------
+
+
+def test_targets_description():
+    assert "OST" in FsxTargetsAreReachable().description
+
+
+def test_targets_requires_approval():
+    assert FsxTargetsAreReachable().approval_required(sample_context_with_lustre(NodeType.HEAD)) is True
+
+
+def test_targets_all_active_and_full_passes(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {"lfs check": _timed(stdout=_LFS_CHECK_HEALTHY), "import": _timed(stdout=_IMPORT_EFA)},
+    )
+
+    result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.PASSED
+
+
+def test_targets_unreachable_server_fails(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {"lfs check": _timed(stdout=_LFS_CHECK_BAD), "import": _timed(stdout=_IMPORT_EFA)},
+    )
+
+    result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert FsxTargetsAreReachable.TARGET_UNREACHABLE.code in _codes(result)
+    assert "fs-OST000b-osc-ffff" in _messages(result)
+
+
+def test_targets_lfs_check_timeout_fails(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {
+            "lfs check": _timed(returncode=None, timed_out=True, elapsed=60.0),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+
+    result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert _codes(result) == [FsxTargetsAreReachable.LFS_CHECK_TIMED_OUT.code]
+
+
+def test_targets_non_full_import_fails(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {"lfs check": _timed(stdout=_LFS_CHECK_HEALTHY), "import": _timed(stdout=_IMPORT_DISCONN)},
+    )
+
+    result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert FsxTargetsAreReachable.IMPORT_NOT_FULL.code in _codes(result)
+    assert "DISCONN" in _messages(result)
+
+
+def test_targets_failover_pin_is_info(monkeypatch):
+    _route_time_command(
+        monkeypatch,
+        {"lfs check": _timed(stdout=_LFS_CHECK_HEALTHY), "import": _timed(stdout=_IMPORT_EFA)},
+    )
+
+    result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.PASSED
+    assert FsxTargetsAreReachable.FAILOVER_PINNED.code in _info_codes(result)

@@ -107,7 +107,24 @@ DIRECTORY_LOOKUP_COMMAND_TIMEOUT_SECONDS = 30
 # FSx / shared-storage diagnostics
 # `lfs df -h` must return within this or the filesystem is treated as hanging (server/OST unreachable).
 FSX_LFS_DF_TIMEOUT_SECONDS = 30
+# `lfs check servers` probes every target, so allow it longer than a plain `lfs df`.
+FSX_LFS_CHECK_TIMEOUT_SECONDS = 60
+# `lnetctl net show` is a fast, local query; cap it low so a wedged LNet cannot stall the check.
+FSX_LNET_SHOW_TIMEOUT_SECONDS = 15
+# `lctl get_param` reads client-side import state; bound it so a stuck import cannot hang the check.
+FSX_OST_QUERY_TIMEOUT_SECONDS = 30
+# `lnetctl ping` over EFA; a hang here is the signal the EFA data path is not working.
+FSX_EFA_PING_TIMEOUT_SECONDS = 15
 # The StorageType value a FSx for Lustre mount carries in the cluster configuration's SharedStorage.
 LUSTRE_STORAGE_TYPE = "FsxLustre"
 # NFS-based shared-storage types, handled with shallow reachability only (not in scope for PR1).
 NFS_STORAGE_TYPES = ("FsxOntap", "FsxOpenZfs", "Efs")
+# The osc/mdc import ``state:`` value indicating a reachable, fully-connected target.
+HEALTHY_TARGET_STATE = "FULL"
+# The persistent LNet config FSx OSSes import via ``lnetctl import``; usually absent on PC compute nodes
+# (LNet is configured at runtime by the bootstrap script), which is itself informative.
+LNET_PERSISTENT_CONF_PATH = "/etc/lnet.conf"
+# The LNet net type for the EFA LND (kefalnd).
+EFA_LNET_NET = "efa"
+# EFA/RDMA devices surface here; the count is compared against the devices bound to LNet.
+EFA_INFINIBAND_SYSFS = "/sys/class/infiniband"

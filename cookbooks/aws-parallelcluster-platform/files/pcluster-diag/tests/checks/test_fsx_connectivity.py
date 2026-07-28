@@ -10,19 +10,17 @@
 # OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for the FSx for Lustre client, mount-presence, and reachability checks."""
+"""Unit tests for the consolidated LustreFilesystem check and the opt-in FsxTargetsAreReachable check.
+
+Mirroring the Active Directory tests, each probe of the consolidated ``LustreFilesystem`` check is
+exercised directly (``_probe_*`` with its own finding lists), plus a few ``run``-level tests covering
+aggregation and probe-crash isolation.
+"""
 
 import pytest
 
 from pcluster_diag.checks import fsx_connectivity
-from pcluster_diag.checks.fsx_connectivity import (
-    FsxEfaMountIsHealthy,
-    FsxFilesystemsAreReachable,
-    FsxLnetInterfacesAreHealthy,
-    FsxMountsArePresent,
-    FsxTargetsAreReachable,
-    LustreClientIsInstalled,
-)
+from pcluster_diag.checks.fsx_connectivity import FsxTargetsAreReachable, LustreFilesystem, _LnetSnapshot
 from pcluster_diag.models.context import NodeType
 from pcluster_diag.models.result import Status
 from pcluster_diag.util.shell import TimedCommand
@@ -49,37 +47,45 @@ def _timed(returncode=0, stdout="", stderr="", timed_out=False, elapsed=0.01):
     )
 
 
-def _codes(result):
-    return [finding.code for finding in (result.errors or [])]
+def _codes(findings):
+    return [finding.code for finding in (findings or [])]
 
 
-def _warn_codes(result):
-    return [finding.code for finding in (result.warnings or [])]
+def _messages(findings):
+    return " | ".join(finding.message for finding in (findings or []))
 
 
 def _info_codes(result):
     return [finding.code for finding in (result.infos or [])]
 
 
-def _messages(result):
-    return " | ".join(finding.message for finding in (result.errors or []))
+def _snapshot(stdout):
+    """Build an _LnetSnapshot from parsed ``lnetctl net show -v`` output (as the check would fetch it)."""
+    from pcluster_diag.util import lustre
+
+    return _LnetSnapshot(timed_out=False, nets=lustre.parse_lnet_net_show(stdout))
 
 
-# --- should_run gating (shared by all three checks) -----------------------------------
+# --- should_run gating ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("check", [LustreClientIsInstalled(), FsxMountsArePresent(), FsxFilesystemsAreReachable()])
+@pytest.mark.parametrize("check", [LustreFilesystem(), FsxTargetsAreReachable()])
 @pytest.mark.parametrize("node_type", list(NodeType), ids=lambda nt: nt.name)
 def test_should_run_true_on_all_node_types_when_lustre_configured(check, node_type):
     assert check.should_run(sample_context_with_lustre(node_type)) is True
 
 
-@pytest.mark.parametrize("check", [LustreClientIsInstalled(), FsxMountsArePresent(), FsxFilesystemsAreReachable()])
+@pytest.mark.parametrize("check", [LustreFilesystem(), FsxTargetsAreReachable()])
 def test_should_run_false_when_no_lustre_configured(check):
     assert check.should_run(sample_context(NodeType.HEAD)) is False
 
 
-# --- LustreClientIsInstalled ----------------------------------------------------------
+def test_description():
+    description = LustreFilesystem().description
+    assert "FsxLustre" in description or "Lustre" in description
+
+
+# --- client probe ---------------------------------------------------------------------
 
 
 def _patch_client(monkeypatch, *, available=True, loaded=True, version="2.15.6"):
@@ -89,78 +95,41 @@ def _patch_client(monkeypatch, *, available=True, loaded=True, version="2.15.6")
     monkeypatch.setattr(fsx_connectivity.lustre, "lustre_client_version", lambda: version)
 
 
-def test_client_description():
-    assert "Lustre client" in LustreClientIsInstalled().description
-
-
-def test_client_modules_available_passes_with_version_info(monkeypatch):
+def test_client_modules_available_reports_version_and_no_error(monkeypatch):
     _patch_client(monkeypatch)
+    errors, infos = [], []
 
-    result = LustreClientIsInstalled().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_client(errors, infos)
 
-    assert result.status is Status.PASSED
-    assert _info_codes(result) == [LustreClientIsInstalled.CLIENT_VERSION.code]
-    assert "2.15.6" in result.infos[0].message
+    assert errors == []
+    assert _codes(infos) == [LustreFilesystem.CLIENT_VERSION.code]
+    assert "2.15.6" in infos[0].message
 
 
-def test_client_modules_unavailable_fails_naming_kernel(monkeypatch):
-    # An unavailable module cannot be loaded either; the check must report only the NOT_INSTALLED error
-    # and NOT also the MODULES_NOT_LOADED warning for the same root cause.
+def test_client_modules_unavailable_reports_only_not_installed(monkeypatch):
+    # An unavailable module cannot be loaded either; the probe must report only the NOT_INSTALLED error
+    # and NOT also MODULES_NOT_LOADED for the same root cause.
     _patch_client(monkeypatch, available=False, loaded=False, version=None)
+    errors, infos = [], []
 
-    result = LustreClientIsInstalled().run(sample_context_with_lustre(NodeType.HEAD))
+    LustreFilesystem()._probe_client(errors, infos)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [LustreClientIsInstalled.NOT_INSTALLED.code]
-    assert "6.1.0-amzn2023" in _messages(result)
-    assert _warn_codes(result) == []
+    assert _codes(errors) == [LustreFilesystem.NOT_INSTALLED.code]
+    assert "6.1.0-amzn2023" in _messages(errors)
 
 
 def test_client_modules_available_but_not_loaded_fails(monkeypatch):
     _patch_client(monkeypatch, loaded=False)
+    errors, infos = [], []
 
-    result = LustreClientIsInstalled().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_client(errors, infos)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [LustreClientIsInstalled.MODULES_NOT_LOADED.code]
+    assert _codes(errors) == [LustreFilesystem.MODULES_NOT_LOADED.code]
     # The error names the specific modules that are available but not loaded.
-    error_message = result.errors[0].message
-    assert "lustre" in error_message and "lnet" in error_message
+    assert "lustre" in errors[0].message and "lnet" in errors[0].message
 
 
-# --- FsxMountsArePresent --------------------------------------------------------------
-
-
-def test_mounts_description():
-    assert "mounted" in FsxMountsArePresent().description
-
-
-def test_mounts_all_present_passes(monkeypatch):
-    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_BOTH))
-
-    result = FsxMountsArePresent().run(sample_context_with_lustre(NodeType.HEAD))
-
-    assert result.status is Status.PASSED
-
-
-def test_mounts_missing_one_fails_naming_only_that_mount(monkeypatch):
-    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_ONLY_FSX))
-
-    result = FsxMountsArePresent().run(sample_context_with_lustre(NodeType.HEAD))
-
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxMountsArePresent.NOT_MOUNTED.code]
-    assert "/fsx-efa" in _messages(result)
-    assert "'/fsx'" not in _messages(result)
-
-
-def test_mounts_none_present_fails_for_all(monkeypatch):
-    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(""))
-
-    result = FsxMountsArePresent().run(sample_context_with_lustre(NodeType.HEAD))
-
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxMountsArePresent.NOT_MOUNTED.code, FsxMountsArePresent.NOT_MOUNTED.code]
+# --- mount-presence probe -------------------------------------------------------------
 
 
 def _mounts_from(proc_mounts):
@@ -170,7 +139,36 @@ def _mounts_from(proc_mounts):
     return lambda: parsed
 
 
-# --- FsxFilesystemsAreReachable -------------------------------------------------------
+def test_mounts_all_present_no_error(monkeypatch):
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_BOTH))
+    errors = []
+
+    LustreFilesystem()._probe_mounts(sample_context_with_lustre(NodeType.HEAD), errors)
+
+    assert errors == []
+
+
+def test_mounts_missing_one_fails_naming_only_that_mount(monkeypatch):
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_ONLY_FSX))
+    errors = []
+
+    LustreFilesystem()._probe_mounts(sample_context_with_lustre(NodeType.HEAD), errors)
+
+    assert _codes(errors) == [LustreFilesystem.NOT_MOUNTED.code]
+    assert "/fsx-efa" in _messages(errors)
+    assert "'/fsx'" not in _messages(errors)
+
+
+def test_mounts_none_present_fails_for_all(monkeypatch):
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(""))
+    errors = []
+
+    LustreFilesystem()._probe_mounts(sample_context_with_lustre(NodeType.HEAD), errors)
+
+    assert _codes(errors) == [LustreFilesystem.NOT_MOUNTED.code, LustreFilesystem.NOT_MOUNTED.code]
+
+
+# --- filesystem-reachability probe ----------------------------------------------------
 
 
 def _patch_lfs(monkeypatch, results_by_mount):
@@ -183,19 +181,16 @@ def _patch_lfs(monkeypatch, results_by_mount):
     monkeypatch.setattr(fsx_connectivity, "time_command", fake_time_command)
 
 
-def test_reachable_description():
-    assert "reachable" in FsxFilesystemsAreReachable().description
-
-
-def test_reachable_all_healthy_passes(monkeypatch):
+def test_reachable_all_healthy_no_error(monkeypatch):
     _patch_lfs(
         monkeypatch,
         {"/fsx": _timed(stdout=_HEALTHY_LFS_DF), "/fsx-efa": _timed(stdout=_HEALTHY_LFS_DF)},
     )
+    errors = []
 
-    result = FsxFilesystemsAreReachable().run(sample_context_with_lustre(NodeType.LOGIN))
+    LustreFilesystem()._probe_reachable(sample_context_with_lustre(NodeType.LOGIN), errors)
 
-    assert result.status is Status.PASSED
+    assert errors == []
 
 
 def test_reachable_hang_reports_timeout_for_only_that_mount(monkeypatch):
@@ -206,13 +201,13 @@ def test_reachable_hang_reports_timeout_for_only_that_mount(monkeypatch):
             "/fsx-efa": _timed(returncode=None, timed_out=True, elapsed=30.0),
         },
     )
+    errors = []
 
-    result = FsxFilesystemsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_reachable(sample_context_with_lustre(NodeType.COMPUTE), errors)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxFilesystemsAreReachable.LFS_DF_TIMED_OUT.code]
-    assert "/fsx-efa" in _messages(result)
-    assert "hanging" in _messages(result)
+    assert _codes(errors) == [LustreFilesystem.LFS_DF_TIMED_OUT.code]
+    assert "/fsx-efa" in _messages(errors)
+    assert "hanging" in _messages(errors)
 
 
 def test_reachable_nonzero_exit_reports_error(monkeypatch):
@@ -223,12 +218,12 @@ def test_reachable_nonzero_exit_reports_error(monkeypatch):
             "/fsx-efa": _timed(stdout=_HEALTHY_LFS_DF),
         },
     )
+    errors = []
 
-    result = FsxFilesystemsAreReachable().run(sample_context_with_lustre(NodeType.HEAD))
+    LustreFilesystem()._probe_reachable(sample_context_with_lustre(NodeType.HEAD), errors)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxFilesystemsAreReachable.LFS_DF_FAILED.code]
-    assert "transport endpoint shutdown" in _messages(result)
+    assert _codes(errors) == [LustreFilesystem.LFS_DF_FAILED.code]
+    assert "transport endpoint shutdown" in _messages(errors)
 
 
 def test_reachable_down_target_reports_target_unavailable(monkeypatch):
@@ -236,13 +231,13 @@ def test_reachable_down_target_reports_target_unavailable(monkeypatch):
         monkeypatch,
         {"/fsx": _timed(stdout=_DEGRADED_LFS_DF), "/fsx-efa": _timed(stdout=_HEALTHY_LFS_DF)},
     )
+    errors = []
 
-    result = FsxFilesystemsAreReachable().run(sample_context_with_lustre(NodeType.HEAD))
+    LustreFilesystem()._probe_reachable(sample_context_with_lustre(NodeType.HEAD), errors)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxFilesystemsAreReachable.TARGET_UNAVAILABLE.code]
-    assert "fs-abc-OST0001_UUID" in _messages(result)
-    assert "/fsx" in _messages(result)
+    assert _codes(errors) == [LustreFilesystem.TARGET_UNAVAILABLE.code]
+    assert "fs-abc-OST0001_UUID" in _messages(errors)
+    assert "/fsx" in _messages(errors)
 
 
 def test_reachable_aggregates_multiple_mount_failures(monkeypatch):
@@ -253,17 +248,17 @@ def test_reachable_aggregates_multiple_mount_failures(monkeypatch):
             "/fsx-efa": _timed(returncode=2, stderr="No such device"),
         },
     )
+    errors = []
 
-    result = FsxFilesystemsAreReachable().run(sample_context_with_lustre(NodeType.HEAD))
+    LustreFilesystem()._probe_reachable(sample_context_with_lustre(NodeType.HEAD), errors)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [
-        FsxFilesystemsAreReachable.LFS_DF_TIMED_OUT.code,
-        FsxFilesystemsAreReachable.LFS_DF_FAILED.code,
+    assert _codes(errors) == [
+        LustreFilesystem.LFS_DF_TIMED_OUT.code,
+        LustreFilesystem.LFS_DF_FAILED.code,
     ]
 
 
-# --- shared fixtures for the LNet / EFA / target checks -------------------------------
+# --- shared fixtures for the LNet / EFA / target probes -------------------------------
 
 _LNET_TCP_EFA = """\
 net:
@@ -411,182 +406,227 @@ def _route_time_command(monkeypatch, routes, default=None):
     monkeypatch.setattr(fsx_connectivity, "time_command", fake_time_command)
 
 
-# --- FsxLnetInterfacesAreHealthy ------------------------------------------------------
+# --- LNet-transport probe -------------------------------------------------------------
 
 
-def test_lnet_description():
-    assert "LNet" in FsxLnetInterfacesAreHealthy().description
-
-
-def test_lnet_reports_active_lnds_and_passes(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
+def test_lnet_reports_active_lnds_no_error(monkeypatch):
     monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    errors, warnings, infos = [], [], []
 
-    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_lnet(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert result.status is Status.PASSED
-    active_info = next(i for i in result.infos if i.code == FsxLnetInterfacesAreHealthy.ACTIVE_LNDS.code)
+    assert errors == []
+    active_info = next(i for i in infos if i.code == LustreFilesystem.ACTIVE_LNDS.code)
     assert "tcp" in active_info.message and "efa" in active_info.message
     # loopback is not reported as an active transport
     assert "lo" not in active_info.message.split("transports:")[1]
 
 
 def test_lnet_no_nets_fails(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(stdout="net:\n")})
     monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    errors, warnings, infos = [], [], []
 
-    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_lnet(_snapshot("net:\n"), errors, warnings, infos)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxLnetInterfacesAreHealthy.LNET_NOT_CONFIGURED.code]
+    assert _codes(errors) == [LustreFilesystem.LNET_NOT_CONFIGURED.code]
 
 
-def test_lnet_timeout_fails_with_timeout_code(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(returncode=None, timed_out=True, elapsed=15.0)})
+def test_lnet_timeout_fails_with_timeout_code():
+    errors, warnings, infos = [], [], []
 
-    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_lnet(_LnetSnapshot(timed_out=True), errors, warnings, infos)
 
-    assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxLnetInterfacesAreHealthy.LNETCTL_TIMED_OUT.code]
+    assert _codes(errors) == [LustreFilesystem.LNETCTL_TIMED_OUT.code]
 
 
 def test_lnet_health_decay_is_warning(monkeypatch):
     decayed = _LNET_EFA_NO_TRAFFIC.replace("health value: 1000", "health value: 500", 1)
-    _route_time_command(monkeypatch, {"net show": _timed(stdout=decayed)})
     monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    errors, warnings, infos = [], [], []
 
-    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_lnet(_snapshot(decayed), errors, warnings, infos)
 
-    assert result.status is Status.WARNING
-    assert _warn_codes(result) == [FsxLnetInterfacesAreHealthy.HEALTH_DEGRADED.code]
+    assert _codes(warnings) == [LustreFilesystem.HEALTH_DEGRADED.code]
 
 
 def test_lnet_reports_persistent_conf_present(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
     monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: True)
+    errors, warnings, infos = [], [], []
 
-    result = FsxLnetInterfacesAreHealthy().run(sample_context_with_lustre(NodeType.HEAD))
+    LustreFilesystem()._probe_lnet(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert result.status is Status.PASSED
-    assert FsxLnetInterfacesAreHealthy.PERSISTENT_CONF_PRESENT.code in _info_codes(result)
-
-
-# --- FsxEfaMountIsHealthy -------------------------------------------------------------
+    assert LustreFilesystem.PERSISTENT_CONF_PRESENT.code in _codes(infos)
 
 
-def test_efa_description():
-    assert "EFA" in FsxEfaMountIsHealthy().description
+# --- EFA-mount probe ------------------------------------------------------------------
 
 
-def test_efa_should_run_false_without_efa_net(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_ONLY)})
+def test_efa_probe_noop_without_efa_net(monkeypatch):
+    # No @efa net configured: the EFA probe records nothing (non-EFA clusters see no findings).
+    errors, warnings, infos = [], [], []
 
-    assert FsxEfaMountIsHealthy().should_run(sample_context_with_lustre(NodeType.COMPUTE)) is False
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_TCP_ONLY), errors, warnings, infos)
 
-
-def test_efa_should_run_false_without_lustre(monkeypatch):
-    assert FsxEfaMountIsHealthy().should_run(sample_context(NodeType.HEAD)) is False
-
-
-def test_efa_should_run_true_with_efa_net(monkeypatch):
-    _route_time_command(monkeypatch, {"net show": _timed(stdout=_LNET_TCP_EFA)})
-
-    assert FsxEfaMountIsHealthy().should_run(sample_context_with_lustre(NodeType.COMPUTE)) is True
+    assert errors == [] and warnings == [] and infos == []
 
 
-def test_efa_all_bound_and_pinging_passes(monkeypatch):
+def test_efa_probe_noop_when_lnet_timed_out():
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(_LnetSnapshot(timed_out=True), errors, warnings, infos)
+
+    assert errors == [] and warnings == [] and infos == []
+
+
+def test_efa_all_bound_and_pinging_no_error(monkeypatch):
     _route_time_command(
         monkeypatch,
         {
-            "net show": _timed(stdout=_LNET_TCP_EFA),
             "peer show": _timed(stdout=_LNET_PEER_EFA),
             "ping": _timed(stdout="ping ok"),
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    errors, warnings, infos = [], [], []
 
-    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert result.status is Status.PASSED
-    assert FsxEfaMountIsHealthy.BOUND_DEVICES.code in _info_codes(result)
+    assert errors == []
+    assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
 
 
 def test_efa_underbound_devices_fails(monkeypatch):
     _route_time_command(
         monkeypatch,
         {
-            "net show": _timed(stdout=_LNET_EFA_UNDERBOUND),
             "peer show": _timed(stdout=_LNET_PEER_EFA),
             "ping": _timed(stdout="ping ok"),
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 16)
+    errors, warnings, infos = [], [], []
 
-    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_EFA_UNDERBOUND), errors, warnings, infos)
 
-    assert result.status is Status.FAILURE
-    assert FsxEfaMountIsHealthy.UNDERBOUND_DEVICES.code in _codes(result)
-    assert "1 of 16" in _messages(result)
+    assert LustreFilesystem.UNDERBOUND_DEVICES.code in _codes(errors)
+    assert "1 of 16" in _messages(errors)
 
 
 def test_efa_ping_failure_points_at_security_group(monkeypatch):
     _route_time_command(
         monkeypatch,
         {
-            "net show": _timed(stdout=_LNET_TCP_EFA),
             "peer show": _timed(stdout=_LNET_PEER_EFA),
             "ping": _timed(returncode=1, stderr="cannot reach"),
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    errors, warnings, infos = [], [], []
 
-    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert result.status is Status.FAILURE
-    assert FsxEfaMountIsHealthy.EFA_PING_FAILED.code in _codes(result)
-    assert "security group" in _messages(result)
+    assert LustreFilesystem.EFA_PING_FAILED.code in _codes(errors)
+    assert "security group" in _messages(errors)
 
 
 def test_efa_no_traffic_is_warning(monkeypatch):
     _route_time_command(
         monkeypatch,
         {
-            "net show": _timed(stdout=_LNET_EFA_NO_TRAFFIC),
             "peer show": _timed(stdout=_LNET_PEER_EFA),
             "ping": _timed(stdout="ok"),
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 2)
+    errors, warnings, infos = [], [], []
 
-    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_EFA_NO_TRAFFIC), errors, warnings, infos)
 
-    assert result.status is Status.WARNING
-    assert FsxEfaMountIsHealthy.NO_TRAFFIC.code in _warn_codes(result)
+    assert LustreFilesystem.NO_TRAFFIC.code in _codes(warnings)
 
 
 def test_efa_tcp_fallback_is_warning(monkeypatch):
     _route_time_command(
         monkeypatch,
         {
-            "net show": _timed(stdout=_LNET_TCP_EFA),
             "peer show": _timed(stdout=_LNET_PEER_EFA),
             "ping": _timed(stdout="ok"),
             "import": _timed(stdout=_IMPORT_TCP_FALLBACK),
         },
     )
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    errors, warnings, infos = [], [], []
 
-    result = FsxEfaMountIsHealthy().run(sample_context_with_lustre(NodeType.COMPUTE))
+    LustreFilesystem()._probe_efa(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert result.status is Status.WARNING
-    assert FsxEfaMountIsHealthy.TCP_FALLBACK.code in _warn_codes(result)
+    assert LustreFilesystem.TCP_FALLBACK.code in _codes(warnings)
 
 
-# --- FsxTargetsAreReachable -----------------------------------------------------------
+# --- run-level aggregation & isolation ------------------------------------------------
+
+
+def test_run_passes_when_all_probes_clean(monkeypatch):
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_BOTH))
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_TCP_EFA),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+            "df": _timed(stdout=_HEALTHY_LFS_DF),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.PASSED
+
+
+def test_run_fails_when_any_probe_reports_an_error(monkeypatch):
+    _patch_client(monkeypatch, available=False, version=None)  # client probe fails
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_BOTH))
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    _route_time_command(
+        monkeypatch,
+        {"net show": _timed(stdout=_LNET_TCP_ONLY), "df": _timed(stdout=_HEALTHY_LFS_DF)},
+    )
+
+    result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    assert result.status is Status.FAILURE
+    assert LustreFilesystem.NOT_INSTALLED.code in _codes(result.errors)
+
+
+def test_run_isolates_unexpected_probe_crash_and_keeps_sibling_findings(monkeypatch):
+    # The client probe crashes; its siblings must still run and their findings survive.
+    def _boom(errors, infos):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(LustreFilesystem, "_probe_client", lambda self, errors, infos: _boom(errors, infos))
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_ONLY_FSX))
+    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
+    _route_time_command(
+        monkeypatch,
+        {"net show": _timed(stdout=_LNET_TCP_EFA), "df": _timed(stdout=_HEALTHY_LFS_DF)},
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
+
+    # The mount probe still reported the missing /fsx-efa mount despite the client probe crashing.
+    assert result.status is Status.FAILURE
+    assert LustreFilesystem.NOT_MOUNTED.code in _codes(result.errors)
+
+
+# --- FsxTargetsAreReachable (unchanged, still its own gated check) --------------------
 
 
 def test_targets_description():
@@ -617,8 +657,8 @@ def test_targets_unreachable_server_fails(monkeypatch):
     result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
 
     assert result.status is Status.FAILURE
-    assert FsxTargetsAreReachable.TARGET_UNREACHABLE.code in _codes(result)
-    assert "fs-OST000b-osc-ffff" in _messages(result)
+    assert FsxTargetsAreReachable.TARGET_UNREACHABLE.code in _codes(result.errors)
+    assert "fs-OST000b-osc-ffff" in _messages(result.errors)
 
 
 def test_targets_lfs_check_timeout_fails(monkeypatch):
@@ -633,7 +673,7 @@ def test_targets_lfs_check_timeout_fails(monkeypatch):
     result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
 
     assert result.status is Status.FAILURE
-    assert _codes(result) == [FsxTargetsAreReachable.LFS_CHECK_TIMED_OUT.code]
+    assert _codes(result.errors) == [FsxTargetsAreReachable.LFS_CHECK_TIMED_OUT.code]
 
 
 def test_targets_non_full_import_fails(monkeypatch):
@@ -645,8 +685,8 @@ def test_targets_non_full_import_fails(monkeypatch):
     result = FsxTargetsAreReachable().run(sample_context_with_lustre(NodeType.COMPUTE))
 
     assert result.status is Status.FAILURE
-    assert FsxTargetsAreReachable.IMPORT_NOT_FULL.code in _codes(result)
-    assert "DISCONN" in _messages(result)
+    assert FsxTargetsAreReachable.IMPORT_NOT_FULL.code in _codes(result.errors)
+    assert "DISCONN" in _messages(result.errors)
 
 
 def test_targets_failover_pin_is_info(monkeypatch):

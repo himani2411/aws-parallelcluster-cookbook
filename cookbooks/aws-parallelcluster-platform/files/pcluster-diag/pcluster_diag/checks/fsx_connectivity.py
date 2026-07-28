@@ -18,29 +18,34 @@ therefore run through :func:`pcluster_diag.util.shell.time_command` with a bound
 timeout is treated as a distinct, first-class failure mode rather than an exception. The fast, local
 queries (kernel-module presence, reading ``/proc/mounts``) go through ``run_command``.
 
-Checks, in execution order:
+Following the Active Directory precedent (a single ``DirectoryService`` check running many probes), the
+always-on Lustre verifications are consolidated into one :class:`LustreFilesystem` check whose ``run``
+executes each probe in isolation and aggregates their findings. The probes are:
 
-- ``LustreClientIsInstalled`` verifies the node can actually speak Lustre (kernel modules available)
-  before connectivity is probed, so a broken client is reported as its own root cause.
-- ``FsxMountsArePresent`` is a cheap, non-hanging pre-flight confirming each configured Lustre mount is
-  actually mounted, so a "not mounted" problem is not misreported downstream as "unreachable".
-- ``FsxFilesystemsAreReachable`` runs ``lfs df -h`` per mount (the FSx-team-recommended first-line
-  command) and classifies a hang, an error, or a down target.
-- ``FsxLnetInterfacesAreHealthy`` parses ``lnetctl net show`` to report the active LNDs (tcp/efa/o2ib),
-  surfacing the EFA-vs-TCP transport state at the heart of the connectivity tickets.
-- ``FsxEfaMountIsHealthy`` runs only when EFA-for-Lustre is expected and detects the two root causes from
-  the tickets: under-bound EFA devices (the p6-b300 2-of-16 bug) and a non-working EFA data path (the
+- **client** -- the ``lustre``/``lnet`` kernel modules are available for the running kernel (so a broken
+  client is reported as its own root cause) and loaded, plus the client version as info;
+- **mount presence** -- each configured Lustre ``MountDir`` is actually mounted (a cheap, non-hanging
+  ``/proc/mounts`` check, so "not mounted" is not misreported downstream as "unreachable");
+- **filesystem reachability** -- ``lfs df -h`` per mount (the FSx-team-recommended first-line command),
+  classifying a hang, an error, or a down target;
+- **LNet transport** -- ``lnetctl net show`` reporting the active LNDs (tcp/efa/o2ib), surfacing the
+  EFA-vs-TCP transport state at the heart of the connectivity tickets;
+- **EFA mount** -- only when an ``@efa`` LNet net is configured, detecting the two root causes from the
+  tickets: under-bound EFA devices (the p6-b300 2-of-16 bug) and a non-working EFA data path (the
   missing self-referencing security-group rule).
-- ``FsxTargetsAreReachable`` is a heavier, opt-in (``approval_required``) deep check that runs
-  ``lfs check servers`` and inspects client-side import state to pinpoint an unreachable OST/MDT.
 
-They run on every node type that has a FsxLustre mount configured, and skip (SKIPPED_NOT_APPLICABLE)
-when the cluster configures no FsxLustre filesystem (``FsxEfaMountIsHealthy`` additionally skips when no
-EFA LNet net is configured). Every probe is read-only.
+:class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
+(``approval_required``) deep probe (``lfs check servers`` + per-target import state); the framework's
+approval gate is per-check, so folding it into the always-on check would either force the deep probe to
+run every time or gate the whole check behind a prompt.
+
+Both checks run on every node type that has a FsxLustre mount configured, and skip
+(SKIPPED_NOT_APPLICABLE) when the cluster configures no FsxLustre filesystem. Every probe is read-only.
 """
 
 import logging
 import os
+from dataclasses import dataclass, field
 from typing import List
 
 from pcluster_diag.core.constants import (
@@ -54,6 +59,7 @@ from pcluster_diag.core.constants import (
     HEALTHY_TARGET_STATE,
     LNET_PERSISTENT_CONF_PATH,
 )
+from pcluster_diag.core.probe import run_probe
 from pcluster_diag.models.check import Check
 from pcluster_diag.models.context import Context
 from pcluster_diag.models.finding import CheckError, CheckInfo, CheckWarning
@@ -69,19 +75,6 @@ def _has_lustre(context: Context) -> bool:
     return bool(shared_storage.lustre_mounts(context))
 
 
-def _lnet_nets():
-    """Return the parsed ``lnetctl net show -v`` nets, or None when the command hung or failed.
-
-    ``-v`` is used so per-NI statistics and health values are available to callers that need them; the
-    non-verbose fields (net type, nid, interfaces) are a subset, so a single verbose call serves both
-    the transport check and the EFA check.
-    """
-    timed = time_command(["lnetctl", "net", "show", "-v"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
-    if timed.timed_out or timed.returncode != 0:
-        return None
-    return lustre.parse_lnet_net_show(timed.stdout)
-
-
 def _efa_device_count() -> int:
     """Return the number of EFA/RDMA devices exposed under ``/sys/class/infiniband`` (0 when none)."""
     try:
@@ -91,15 +84,32 @@ def _efa_device_count() -> int:
         return 0
 
 
-class LustreClientIsInstalled(Check):
-    """Verify the Lustre client is present so the node can speak Lustre.
+@dataclass
+class _LnetSnapshot:
+    """One shared ``lnetctl net show -v`` result, consumed by both the LNet and EFA probes.
 
-    The kernel module is the authoritative signal: Lustre can only mount if the ``lustre`` and ``lnet``
-    modules are available for the running kernel. We check ``modinfo`` for those modules rather than a
-    package name (package names vary by OS/install source, and a package can be present while the module
-    is not built for the current kernel -- in which case Lustre still cannot mount).
+    ``lnetctl net show -v`` is run once per check invocation (it is the input for both the transport
+    probe and the EFA probe), so the two probes share this snapshot instead of each shelling out.
+
+    Attributes:
+        timed_out: Whether the ``lnetctl`` call exceeded its bounded timeout (LNet may be wedged).
+        nets: The parsed LNet nets (empty when the command timed out or returned non-zero).
     """
 
+    timed_out: bool
+    nets: list = field(default_factory=list)
+
+
+class LustreFilesystem(Check):
+    """Diagnose FSx for Lustre client health, mount presence, server reachability, and the EFA transport.
+
+    Runs a sequence of read-only probes (client, mount presence, ``lfs df`` reachability, LNet transport,
+    EFA mount) and aggregates their findings into a single Result. Each probe runs in isolation so one
+    probe's crash does not sink its siblings. See the module docstring for the failure class and the
+    per-probe rationale.
+    """
+
+    # --- Errors: client -----------------------------------------------------------------------
     NOT_INSTALLED = CheckError(
         1,
         "Lustre client is not installed though a FsxLustre filesystem is configured: the lustre/lnet "
@@ -107,22 +117,116 @@ class LustreClientIsInstalled(Check):
         "have rebuilt after a kernel update).",
     )
     MODULES_NOT_LOADED = CheckError(2, "Lustre kernel modules are available but not loaded: {}.")
-    CLIENT_VERSION = CheckInfo(2, "Lustre client version: {}.")
+
+    # --- Errors: mount presence ---------------------------------------------------------------
+    NOT_MOUNTED = CheckError(3, "'{}' ({}) is configured but not mounted.")
+
+    # --- Errors: filesystem reachability ------------------------------------------------------
+    LFS_DF_TIMED_OUT = CheckError(
+        4,
+        "lfs df -h on '{}' did not return within {}s -- the filesystem is hanging (server/OST unreachable).",
+    )
+    LFS_DF_FAILED = CheckError(5, "lfs df -h on '{}' failed: {}")
+    TARGET_UNAVAILABLE = CheckError(6, "target {} on '{}' is not available (possible OST/MDT down).")
+
+    # --- Errors: LNet transport ---------------------------------------------------------------
+    LNETCTL_TIMED_OUT = CheckError(
+        7, "lnetctl net show did not return within {}s -- LNet is not responding (transport may be wedged)."
+    )
+    LNET_NOT_CONFIGURED = CheckError(
+        8, "LNet is not configured though a FsxLustre filesystem is configured (no LNet networks are present)."
+    )
+
+    # --- Errors: EFA mount --------------------------------------------------------------------
+    NO_EFA_DEVICES = CheckError(
+        9, "An EFA LNet net is configured but no EFA devices are exposed under {} -- EFA is not available."
+    )
+    UNDERBOUND_DEVICES = CheckError(
+        10,
+        "Only {} of {} EFA devices are bound to LNet -- Lustre will fall back to TCP "
+        "(matches the p6-b300 2-of-16 bug). Re-run the EFA-Lustre client configuration.",
+    )
+    EFA_PING_FAILED = CheckError(
+        11,
+        "EFA ping from {} to {} failed -- the EFA data path is not working. Check the security group "
+        "has a self-referencing rule by SG-ID (EFA's SRD-over-MAC is not authorized by a 0.0.0.0/0 rule).",
+    )
+
+    # --- Warnings -----------------------------------------------------------------------------
+    HEALTH_DEGRADED = CheckWarning(
+        1, "LNet interface {} (net {}) shows connection-health degradation (health value {})."
+    )
+    NO_TRAFFIC = CheckWarning(
+        2,
+        "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
+    )
+    TCP_FALLBACK = CheckWarning(
+        3, "target {} is connected over @tcp despite EFA being configured (TCP fallback)."
+    )
+
+    # --- Infos --------------------------------------------------------------------------------
+    CLIENT_VERSION = CheckInfo(1, "Lustre client version: {}.")
+    ACTIVE_LNDS = CheckInfo(2, "Active LNet transports: {}.")
+    PERSISTENT_CONF_ABSENT = CheckInfo(
+        3,
+        "No persistent LNet config at {} -- LNet is configured at runtime by the bootstrap script "
+        "(expected on ParallelCluster compute nodes).",
+    )
+    PERSISTENT_CONF_PRESENT = CheckInfo(4, "Persistent LNet config present at {}.")
+    BOUND_DEVICES = CheckInfo(5, "{} of {} EFA devices are bound to LNet.")
 
     @property
     def description(self) -> str:
         """Return the human-readable description of this Check."""
-        return "Verify that the Lustre client is installed."
+        return "Verify that FsxLustre filesystems are installed, mounted, reachable, and riding EFA."
 
     def should_run(self, context: Context) -> bool:
         """Run only when a FsxLustre filesystem is configured."""
         return _has_lustre(context)
 
     def run(self, context: Context) -> Result:
-        """Fail when the Lustre kernel modules are unavailable, or available but not loaded."""
+        """Run every Lustre probe in isolation, accumulate findings, and derive the aggregate Result."""
         errors: List[CheckError] = []
+        warnings: List[CheckWarning] = []
         infos: List[CheckInfo] = []
 
+        # lnetctl net show -v is fetched once here; both the LNet and EFA probes read this snapshot.
+        lnet = self._lnet_snapshot()
+
+        probes = (
+            ("lustre client", lambda: self._probe_client(errors, infos)),
+            ("mount presence", lambda: self._probe_mounts(context, errors)),
+            ("filesystem reachability", lambda: self._probe_reachable(context, errors)),
+            ("lnet transport", lambda: self._probe_lnet(lnet, errors, warnings, infos)),
+            ("efa mount", lambda: self._probe_efa(lnet, errors, warnings, infos)),
+        )
+        for label, probe in probes:
+            run_probe(label, probe, errors)
+
+        return Result.from_findings(self, errors=errors, warnings=warnings, infos=infos)
+
+    # --- Probes -------------------------------------------------------------------------------
+
+    def _lnet_snapshot(self) -> _LnetSnapshot:
+        """Fetch ``lnetctl net show -v`` once, returning a snapshot both LNet/EFA probes consume.
+
+        ``-v`` is used so per-NI statistics and health values are available; the non-verbose fields (net
+        type, nid, interfaces) are a subset, so one verbose call serves both probes.
+        """
+        timed = time_command(["lnetctl", "net", "show", "-v"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
+        if timed.timed_out:
+            return _LnetSnapshot(timed_out=True)
+        nets = lustre.parse_lnet_net_show(timed.stdout) if timed.returncode == 0 else []
+        return _LnetSnapshot(timed_out=False, nets=nets)
+
+    def _probe_client(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
+        """Fail when the Lustre kernel modules are unavailable, or available but not loaded.
+
+        The kernel module is the authoritative signal: Lustre can only mount if the ``lustre`` and
+        ``lnet`` modules are available for the running kernel. We check ``modinfo`` rather than a package
+        name (names vary by OS/install source, and a package can be present while the module is not built
+        for the current kernel -- in which case Lustre still cannot mount).
+        """
         module_available = all(kernel_module.kernel_module_available(m) for m in lustre.LUSTRE_KERNEL_MODULES)
         if not module_available:
             # An unavailable module cannot be loaded, so reporting "not loaded" too would just restate the
@@ -137,58 +241,17 @@ class LustreClientIsInstalled(Check):
         if version:
             infos.append(self.CLIENT_VERSION.format(version))
 
-        return Result.from_findings(self, errors=errors, infos=infos)
-
-
-class FsxMountsArePresent(Check):
-    """Verify each configured FsxLustre MountDir is actually mounted (a non-hanging mount-table check)."""
-
-    NOT_MOUNTED = CheckError(1, "'{}' ({}) is configured but not mounted.")
-
-    @property
-    def description(self) -> str:
-        """Return the human-readable description of this Check."""
-        return "Verify that configured FsxLustre filesystems are mounted."
-
-    def should_run(self, context: Context) -> bool:
-        """Run only when a FsxLustre filesystem is configured."""
-        return _has_lustre(context)
-
-    def run(self, context: Context) -> Result:
-        """Pass when every configured Lustre mount is present in /proc/mounts; fail listing those absent."""
+    def _probe_mounts(self, context: Context, errors: List[CheckError]) -> None:
+        """Fail listing any configured Lustre mount absent from /proc/mounts (a non-hanging check)."""
         mounts = shared_storage.read_mounts()
-        errors: List[CheckError] = []
         for configured in shared_storage.lustre_mounts(context):
             if not shared_storage.is_mounted(mounts, configured.mount_dir, shared_storage.LUSTRE_FS_TYPE):
                 errors.append(self.NOT_MOUNTED.format(configured.mount_dir, configured.storage_type))
-        return Result.from_findings(self, errors=errors)
 
-
-class FsxFilesystemsAreReachable(Check):
-    """Verify each Lustre mount answers ``lfs df -h`` (server/OST reachability) without hanging."""
-
-    LFS_DF_TIMED_OUT = CheckError(
-        1,
-        "lfs df -h on '{}' did not return within {}s -- the filesystem is hanging (server/OST unreachable).",
-    )
-    LFS_DF_FAILED = CheckError(2, "lfs df -h on '{}' failed: {}")
-    TARGET_UNAVAILABLE = CheckError(3, "target {} on '{}' is not available (possible OST/MDT down).")
-
-    @property
-    def description(self) -> str:
-        """Return the human-readable description of this Check."""
-        return "Verify that configured FsxLustre filesystems are reachable via lfs df."
-
-    def should_run(self, context: Context) -> bool:
-        """Run only when a FsxLustre filesystem is configured."""
-        return _has_lustre(context)
-
-    def run(self, context: Context) -> Result:
+    def _probe_reachable(self, context: Context, errors: List[CheckError]) -> None:
         """Aggregate ``lfs df -h`` per Lustre mount, classifying a hang, an error, or a down target."""
-        errors: List[CheckError] = []
         for configured in shared_storage.lustre_mounts(context):
             errors.extend(self._probe_mount(configured.mount_dir))
-        return Result.from_findings(self, errors=errors)
 
     def _probe_mount(self, mount_dir: str) -> List[CheckError]:
         """Return the CheckErrors for one Lustre mount: empty when it is reachable and all targets are up."""
@@ -203,63 +266,67 @@ class FsxFilesystemsAreReachable(Check):
             for target in lustre.unavailable_targets(timed.stdout)
         ]
 
+    def _probe_lnet(
+        self,
+        lnet: _LnetSnapshot,
+        errors: List[CheckError],
+        warnings: List[CheckWarning],
+        infos: List[CheckInfo],
+    ) -> None:
+        """Report the active LNDs; fail when LNet is unresponsive or unconfigured while Lustre is present.
 
-class FsxLnetInterfacesAreHealthy(Check):
-    """Report the LNet transport backing Lustre, surfacing the EFA-vs-TCP state at the heart of the ticket.
-
-    Parses ``lnetctl net show`` (via ``time_command``) and reports which LNDs are active (``tcp``,
-    ``efa``, ``o2ib``). A node still carrying an ``@efa`` net after an intended TCP cutover -- or, the
-    reverse, no LNet at all while a Lustre filesystem is mounted -- is immediately visible. This check is
-    read-only and never mutates LNet.
-    """
-
-    LNETCTL_TIMED_OUT = CheckError(
-        1, "lnetctl net show did not return within {}s -- LNet is not responding (transport may be wedged)."
-    )
-    LNET_NOT_CONFIGURED = CheckError(
-        2, "LNet is not configured though a FsxLustre filesystem is configured (no LNet networks are present)."
-    )
-    HEALTH_DEGRADED = CheckWarning(
-        1, "LNet interface {} (net {}) shows connection-health degradation (health value {})."
-    )
-    ACTIVE_LNDS = CheckInfo(1, "Active LNet transports: {}.")
-    PERSISTENT_CONF_ABSENT = CheckInfo(
-        2,
-        "No persistent LNet config at {} -- LNet is configured at runtime by the bootstrap script "
-        "(expected on ParallelCluster compute nodes).",
-    )
-    PERSISTENT_CONF_PRESENT = CheckInfo(3, "Persistent LNet config present at {}.")
-
-    @property
-    def description(self) -> str:
-        """Return the human-readable description of this Check."""
-        return "Verify that LNet interfaces backing FsxLustre are configured and healthy."
-
-    def should_run(self, context: Context) -> bool:
-        """Run only when a FsxLustre filesystem is configured."""
-        return _has_lustre(context)
-
-    def run(self, context: Context) -> Result:
-        """Report the active LNDs; fail when LNet is unresponsive or unconfigured while Lustre is present."""
-        errors: List[CheckError] = []
-        warnings: List[CheckWarning] = []
-        infos: List[CheckInfo] = []
-
-        timed = time_command(["lnetctl", "net", "show", "-v"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
-        if timed.timed_out:
+        Parses ``lnetctl net show`` and reports which LNDs are active (``tcp``, ``efa``, ``o2ib``). A node
+        still carrying an ``@efa`` net after an intended TCP cutover -- or, the reverse, no LNet at all
+        while a Lustre filesystem is mounted -- is immediately visible. Read-only; never mutates LNet.
+        """
+        if lnet.timed_out:
             errors.append(self.LNETCTL_TIMED_OUT.format(FSX_LNET_SHOW_TIMEOUT_SECONDS))
-            return Result.from_findings(self, errors=errors, warnings=warnings, infos=infos)
+            return
 
-        nets = lustre.parse_lnet_net_show(timed.stdout) if timed.returncode == 0 else []
-        active = lustre.active_lnds(nets)
+        active = lustre.active_lnds(lnet.nets)
         if not active:
             errors.append(self.LNET_NOT_CONFIGURED)
         else:
             infos.append(self.ACTIVE_LNDS.format(", ".join(active)))
-            warnings.extend(self._health_warnings(nets))
+            warnings.extend(self._health_warnings(lnet.nets))
 
         infos.append(self._persistent_conf_info())
-        return Result.from_findings(self, errors=errors, warnings=warnings, infos=infos)
+
+    def _probe_efa(
+        self,
+        lnet: _LnetSnapshot,
+        errors: List[CheckError],
+        warnings: List[CheckWarning],
+        infos: List[CheckInfo],
+    ) -> None:
+        """Detect the two EFA-for-Lustre root causes: under-bound devices and a dead EFA data path.
+
+        Acts only when EFA-for-Lustre is expected (an ``@efa`` LNet net is configured); otherwise it is a
+        no-op so non-EFA clusters do not see spurious findings. Automates the FSx tutorial's "Validate FSx
+        with EFA is working" commands (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the
+        client-side import state, to name -- not fix -- the failures. Read-only: never re-binds devices or
+        edits the security group.
+        """
+        if lnet.timed_out:
+            # The LNet probe already reported the hang; there is nothing to inspect here.
+            return
+        efa_net = lustre.lnet_net(lnet.nets, EFA_LNET_NET)
+        if efa_net is None:
+            # EFA-for-Lustre is not configured on this node; nothing to check.
+            return
+
+        bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
+        available = _efa_device_count()
+        if available == 0:
+            errors.append(self.NO_EFA_DEVICES.format(EFA_INFINIBAND_SYSFS))
+        elif len(bound) < available:
+            errors.append(self.UNDERBOUND_DEVICES.format(len(bound), available))
+        else:
+            infos.append(self.BOUND_DEVICES.format(len(bound), available))
+
+        warnings.extend(self._traffic_warnings(efa_net))
+        errors.extend(self._efa_ping_errors(lnet.nets))
+        warnings.extend(self._tcp_fallback_warnings(lnet.nets))
 
     def _health_warnings(self, nets) -> List[CheckWarning]:
         """Return a warning per NI whose health value has decayed below the healthy maximum (1000)."""
@@ -275,81 +342,6 @@ class FsxLnetInterfacesAreHealthy(Check):
         if os.path.exists(LNET_PERSISTENT_CONF_PATH):
             return self.PERSISTENT_CONF_PRESENT.format(LNET_PERSISTENT_CONF_PATH)
         return self.PERSISTENT_CONF_ABSENT.format(LNET_PERSISTENT_CONF_PATH)
-
-
-class FsxEfaMountIsHealthy(Check):
-    """Detect the two EFA-for-Lustre root causes from the tickets: under-bound devices and a dead EFA path.
-
-    Runs only when EFA-for-Lustre is expected (an ``@efa`` LNet net is configured). Automates the FSx
-    tutorial's "Validate FSx with EFA is working" commands (``lnetctl net show --net efa -v``,
-    ``lnetctl ping ...@efa``) and the client-side import state, to name -- not fix -- the failures:
-
-    - fewer EFA devices bound to LNet than exposed under ``/sys/class/infiniband`` (the p6-b300 2-of-16
-      bug that silently falls back to TCP);
-    - an ``@efa`` interface showing no traffic (``send_count``/``recv_count`` both zero);
-    - targets connected over ``@tcp`` while ``@efa`` is configured (silent TCP fallback).
-
-    This check is read-only: it never re-binds devices or edits the security group.
-    """
-
-    NO_EFA_DEVICES = CheckError(
-        1, "An EFA LNet net is configured but no EFA devices are exposed under {} -- EFA is not available."
-    )
-    UNDERBOUND_DEVICES = CheckError(
-        2,
-        "Only {} of {} EFA devices are bound to LNet -- Lustre will fall back to TCP "
-        "(matches the p6-b300 2-of-16 bug). Re-run the EFA-Lustre client configuration.",
-    )
-    EFA_PING_FAILED = CheckError(
-        3,
-        "EFA ping from {} to {} failed -- the EFA data path is not working. Check the security group "
-        "has a self-referencing rule by SG-ID (EFA's SRD-over-MAC is not authorized by a 0.0.0.0/0 rule).",
-    )
-    NO_TRAFFIC = CheckWarning(
-        1,
-        "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
-    )
-    TCP_FALLBACK = CheckWarning(
-        2, "target {} is connected over @tcp despite EFA being configured (TCP fallback)."
-    )
-    BOUND_DEVICES = CheckInfo(1, "{} of {} EFA devices are bound to LNet.")
-
-    @property
-    def description(self) -> str:
-        """Return the human-readable description of this Check."""
-        return "Verify that EFA-backed FsxLustre mounts are riding EFA (not falling back to TCP)."
-
-    def should_run(self, context: Context) -> bool:
-        """Run only when a FsxLustre filesystem is configured and an EFA LNet net is present."""
-        if not _has_lustre(context):
-            return False
-        nets = _lnet_nets()
-        return nets is not None and lustre.lnet_net(nets, EFA_LNET_NET) is not None
-
-    def run(self, context: Context) -> Result:
-        """Compare bound-vs-available EFA devices, flag zero-traffic interfaces, and detect TCP fallback."""
-        errors: List[CheckError] = []
-        warnings: List[CheckWarning] = []
-        infos: List[CheckInfo] = []
-
-        nets = _lnet_nets() or []
-        efa_net = lustre.lnet_net(nets, EFA_LNET_NET)
-        bound = lustre.lnet_bound_interfaces(nets, EFA_LNET_NET)
-        available = _efa_device_count()
-
-        if available == 0:
-            errors.append(self.NO_EFA_DEVICES.format(EFA_INFINIBAND_SYSFS))
-        elif len(bound) < available:
-            errors.append(self.UNDERBOUND_DEVICES.format(len(bound), available))
-        else:
-            infos.append(self.BOUND_DEVICES.format(len(bound), available))
-
-        if efa_net is not None:
-            warnings.extend(self._traffic_warnings(efa_net))
-            errors.extend(self._efa_ping_errors(nets))
-        warnings.extend(self._tcp_fallback_warnings(nets))
-
-        return Result.from_findings(self, errors=errors, warnings=warnings, infos=infos)
 
     def _traffic_warnings(self, efa_net) -> List[CheckWarning]:
         """Return a warning per EFA NI that reports zero send and zero receive traffic."""
@@ -411,6 +403,7 @@ class FsxTargetsAreReachable(Check):
     ``time_command`` and inspects client-side import state (``lctl get_param osc.*.import`` /
     ``mdc.*.import``). Because probing individual targets is heavier and can itself block, this check is
     gated behind ``approval_required`` so it runs only when the operator opts in (or passes ``--yes``).
+    It is kept separate from :class:`LustreFilesystem` because the approval gate is per-check.
     """
 
     LFS_CHECK_TIMED_OUT = CheckError(

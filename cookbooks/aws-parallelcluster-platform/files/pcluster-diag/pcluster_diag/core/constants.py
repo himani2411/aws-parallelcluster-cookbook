@@ -121,10 +121,25 @@ LUSTRE_STORAGE_TYPE = "FsxLustre"
 NFS_STORAGE_TYPES = ("FsxOntap", "FsxOpenZfs", "Efs")
 # The osc/mdc import ``state:`` value indicating a reachable, fully-connected target.
 HEALTHY_TARGET_STATE = "FULL"
-# The persistent LNet config FSx OSSes import via ``lnetctl import``; usually absent on PC compute nodes
-# (LNet is configured at runtime by the bootstrap script), which is itself informative.
-LNET_PERSISTENT_CONF_PATH = "/etc/lnet.conf"
 # The LNet net type for the EFA LND (kefalnd).
 EFA_LNET_NET = "efa"
 # EFA/RDMA devices surface here; the count is compared against the devices bound to LNet.
 EFA_INFINIBAND_SYSFS = "/sys/class/infiniband"
+# The EFA driver kernel module (its version gates the EFA-Lustre path).
+EFA_DRIVER_KERNEL_MODULE = "efa"
+# The EFA LND kernel module. Its presence is exactly how the official FSx installer defines "this Lustre
+# client supports EFA" (AWSSimbaLustreClientConfigs install-fsx-lustre-client.sh:verify_lustre_supports_efa),
+# so it is a prerequisite for any EFA-for-Lustre probing, checked before the data-path probes run.
+EFA_LND_KERNEL_MODULE = "kefalnd"
+# Minimum versions the official configure-efa-fsx-lustre-client script enforces before configuring EFA.
+MIN_EFA_DRIVER_VERSION = "2.12.1"  # check_efa_driver_ver / MIN_EFA_VERSION
+MIN_KEFALND_VERSION_P6 = "1.1.1"  # check_kefalnd_ver / P6PLUS_MIN_KEFALND_VERSION (p6+ only)
+MIN_LUSTRE_CLIENT_VERSION = "2.15"  # check_lustre_userspace_ver
+# Instance-family prefixes that require the kefalnd version check (the script's P6PLUS_INSTACES_PREFIX).
+P6PLUS_INSTANCE_PREFIXES = ("p6-b200", "p6e-gb200", "p6-b300")
+# The systemd oneshot service the FSx EFA-Lustre setup installs (setup.sh) to (re)configure LNet on every
+# boot. Its state -- not /etc/lnet.conf -- is the real persistence/health signal for this delivery vehicle.
+EFA_LUSTRE_SYSTEMD_SERVICE = "configure-efa-fsx-lustre-client.service"
+# Substring identifying the EFA-Lustre client config script (setup.sh / the .py it installs) when it is
+# wired as a cluster OnNodeStart custom action; used to decide whether EFA-for-Lustre is expected.
+EFA_LUSTRE_CONFIG_SCRIPT_MARKER = "configure-efa-fsx-lustre-client"

@@ -261,3 +261,99 @@ def test_parse_lctl_import_flags_non_full_state():
 
 def test_parse_lctl_import_empty_when_no_blocks():
     assert lustre.parse_lctl_import("some noise\nno import here\n") == []
+
+
+# --- EFA-for-Lustre client prerequisites ----------------------------------------------
+
+import pytest  # noqa: E402
+
+from pcluster_diag.models.context import Context, NodeType  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "actual, minimum, expected",
+    [
+        ("2.15.6", "2.15", True),
+        ("2.15", "2.15", True),
+        ("2.14.9", "2.15", False),
+        ("2.15.6-1.fsx23.el9", "2.15", True),  # only the numeric prefix is compared
+        ("1.1.1", "1.1.1", True),
+        ("1.0.0", "1.1.1", False),
+        ("2.12.1", "2.12.1", True),
+        (None, "2.15", False),  # missing version is not "at least"
+        ("not-a-version", "2.15", False),
+    ],
+)
+def test_version_at_least(actual, minimum, expected):
+    assert lustre.version_at_least(actual, minimum) is expected
+
+
+@pytest.mark.parametrize(
+    "instance_type, expected",
+    [
+        ("p6-b300.48xlarge", True),
+        ("p6-b200.48xlarge", True),
+        ("p6e-gb200.36xlarge", True),
+        ("p5.48xlarge", False),
+        ("c5n.18xlarge", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_is_p6plus_instance(instance_type, expected):
+    assert lustre.is_p6plus_instance(instance_type) is expected
+
+
+def _context(cluster_config):
+    return Context(
+        timestamp="t",
+        pcluster_diag_version="1.0.0",
+        pcluster_version="3.16.0",
+        instance_id="i-0",
+        instance_type="c5n.18xlarge",
+        node_type=NodeType.COMPUTE,
+        cluster_config=cluster_config,
+        dna_json={},
+        head_node_instance_id="i-0",
+    )
+
+
+def test_efa_lustre_custom_action_configured_head_node_single():
+    config = {
+        "HeadNode": {"CustomActions": {"OnNodeStart": {"Script": "s3://b/configure-efa-fsx-lustre-client/setup.sh"}}}
+    }
+    assert lustre.efa_lustre_custom_action_configured(_context(config)) is True
+
+
+def test_efa_lustre_custom_action_configured_queue_list():
+    config = {
+        "Scheduling": {
+            "SlurmQueues": [
+                {
+                    "CustomActions": {
+                        "OnNodeStart": [
+                            {"Script": "s3://b/other.sh"},
+                            {"Script": "x/configure-efa-fsx-lustre-client/setup.sh"},
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+    assert lustre.efa_lustre_custom_action_configured(_context(config)) is True
+
+
+def test_efa_lustre_custom_action_absent_when_unrelated_script():
+    config = {"HeadNode": {"CustomActions": {"OnNodeStart": {"Script": "s3://b/post_install.sh"}}}}
+    assert lustre.efa_lustre_custom_action_configured(_context(config)) is False
+
+
+def test_efa_lustre_custom_action_absent_when_no_custom_actions():
+    assert lustre.efa_lustre_custom_action_configured(_context({"Region": "us-east-1"})) is False
+
+
+def test_efa_lnd_supported_delegates_to_modinfo(monkeypatch):
+    monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: module == "kefalnd")
+    assert lustre.efa_lnd_supported() is True
+    monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: False)
+    assert lustre.efa_lnd_supported() is False

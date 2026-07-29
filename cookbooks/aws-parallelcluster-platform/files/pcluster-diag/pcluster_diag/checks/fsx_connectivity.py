@@ -23,16 +23,22 @@ always-on Lustre verifications are consolidated into one :class:`LustreFilesyste
 executes each probe in isolation and aggregates their findings. The probes are:
 
 - **client** -- the ``lustre``/``lnet`` kernel modules are available for the running kernel (so a broken
-  client is reported as its own root cause) and loaded, plus the client version as info;
+  client is reported as its own root cause) and loaded, plus the client version as info, and -- when the
+  client version is known -- that it meets the minimum the official installer enforces;
 - **mount presence** -- each configured Lustre ``MountDir`` is actually mounted (a cheap, non-hanging
   ``/proc/mounts`` check, so "not mounted" is not misreported downstream as "unreachable");
 - **filesystem reachability** -- ``lfs df -h`` per mount (the FSx-team-recommended first-line command),
   classifying a hang, an error, or a down target;
 - **LNet transport** -- ``lnetctl net show`` reporting the active LNDs (tcp/efa/o2ib), surfacing the
   EFA-vs-TCP transport state at the heart of the connectivity tickets;
-- **EFA mount** -- only when an ``@efa`` LNet net is configured, detecting the two root causes from the
-  tickets: under-bound EFA devices (the p6-b300 2-of-16 bug) and a non-working EFA data path (the
-  missing self-referencing security-group rule).
+- **EFA mount** -- run whenever EFA-for-Lustre is *expected* (an ``@efa`` LNet net is configured, or an
+  OnNodeStart custom action wires the EFA-Lustre config script). It first verifies the EFA prerequisites
+  the way the official ``configure-efa-fsx-lustre-client`` script does -- the ``kefalnd`` module (the
+  installer's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on p6+
+  instances, the kefalnd version -- then the systemd service that persists the LNet config across reboots
+  (``configure-efa-fsx-lustre-client.service``; this delivery vehicle does not use ``/etc/lnet.conf``),
+  then detects the two root causes from the tickets: under-bound EFA devices (the p6-b300 2-of-16 bug) and
+  a non-working EFA data path (the missing self-referencing security-group rule).
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
 (``approval_required``) deep probe (``lfs check servers`` + per-target import state); the framework's
@@ -51,20 +57,23 @@ from typing import List
 from pcluster_diag.core.constants import (
     EFA_INFINIBAND_SYSFS,
     EFA_LNET_NET,
+    EFA_LUSTRE_SYSTEMD_SERVICE,
     FSX_EFA_PING_TIMEOUT_SECONDS,
     FSX_LFS_CHECK_TIMEOUT_SECONDS,
     FSX_LFS_DF_TIMEOUT_SECONDS,
     FSX_LNET_SHOW_TIMEOUT_SECONDS,
     FSX_OST_QUERY_TIMEOUT_SECONDS,
     HEALTHY_TARGET_STATE,
-    LNET_PERSISTENT_CONF_PATH,
+    MIN_EFA_DRIVER_VERSION,
+    MIN_KEFALND_VERSION_P6,
+    MIN_LUSTRE_CLIENT_VERSION,
 )
 from pcluster_diag.core.probe import run_probe
 from pcluster_diag.models.check import Check
 from pcluster_diag.models.context import Context
 from pcluster_diag.models.finding import CheckError, CheckInfo, CheckWarning
 from pcluster_diag.models.result import Result
-from pcluster_diag.util import kernel_module, lustre, shared_storage
+from pcluster_diag.util import kernel_module, lustre, services, shared_storage
 from pcluster_diag.util.shell import time_command
 
 logger = logging.getLogger(__name__)
@@ -117,6 +126,9 @@ class LustreFilesystem(Check):
         "have rebuilt after a kernel update).",
     )
     MODULES_NOT_LOADED = CheckError(2, "Lustre kernel modules are available but not loaded: {}.")
+    CLIENT_TOO_OLD = CheckError(
+        16, "Lustre client version {} is below the minimum {} the FSx EFA-Lustre setup requires."
+    )
 
     # --- Errors: mount presence ---------------------------------------------------------------
     NOT_MOUNTED = CheckError(3, "'{}' ({}) is configured but not mounted.")
@@ -152,6 +164,21 @@ class LustreFilesystem(Check):
         "has a self-referencing rule by SG-ID (EFA's SRD-over-MAC is not authorized by a 0.0.0.0/0 rule).",
     )
 
+    # --- Errors: EFA prerequisites (checked before the EFA data-path probes) ------------------
+    KEFALND_MISSING = CheckError(
+        12,
+        "EFA-for-Lustre is expected on this node but the kefalnd module is not available: the Lustre "
+        "client does not support EFA (install a Lustre client with EFA support). See "
+        "https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html.",
+    )
+    EFA_DRIVER_TOO_OLD = CheckError(13, "EFA driver version {} is below the minimum {} required for EFA-for-Lustre.")
+    KEFALND_TOO_OLD = CheckError(14, "kefalnd version {} is below the minimum {} required on p6+ instances ({}).")
+    EFA_SERVICE_FAILED = CheckError(
+        15,
+        "The EFA-Lustre configuration service {} is in the failed state -- LNet was not configured for "
+        "EFA (check `journalctl -u {}`); Lustre will fall back to TCP.",
+    )
+
     # --- Warnings -----------------------------------------------------------------------------
     HEALTH_DEGRADED = CheckWarning(
         1, "LNet interface {} (net {}) shows connection-health degradation (health value {})."
@@ -160,20 +187,20 @@ class LustreFilesystem(Check):
         2,
         "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
     )
-    TCP_FALLBACK = CheckWarning(
-        3, "target {} is connected over @tcp despite EFA being configured (TCP fallback)."
-    )
+    TCP_FALLBACK = CheckWarning(3, "target {} is connected over @tcp despite EFA being configured (TCP fallback).")
 
     # --- Infos --------------------------------------------------------------------------------
     CLIENT_VERSION = CheckInfo(1, "Lustre client version: {}.")
     ACTIVE_LNDS = CheckInfo(2, "Active LNet transports: {}.")
-    PERSISTENT_CONF_ABSENT = CheckInfo(
+    EFA_SERVICE_ABSENT = CheckInfo(
         3,
-        "No persistent LNet config at {} -- LNet is configured at runtime by the bootstrap script "
-        "(expected on ParallelCluster compute nodes).",
+        "The EFA-Lustre configuration service {} is not installed -- LNet is configured at runtime by the "
+        "bootstrap script (expected when the EFA-Lustre client package is not used).",
     )
-    PERSISTENT_CONF_PRESENT = CheckInfo(4, "Persistent LNet config present at {}.")
+    EFA_SERVICE_ACTIVE = CheckInfo(4, "The EFA-Lustre configuration service {} is installed and not failed.")
     BOUND_DEVICES = CheckInfo(5, "{} of {} EFA devices are bound to LNet.")
+    EFA_DRIVER_VERSION = CheckInfo(6, "EFA driver version: {}.")
+    KEFALND_VERSION = CheckInfo(7, "kefalnd (EFA LND) version: {}.")
 
     @property
     def description(self) -> str:
@@ -198,7 +225,7 @@ class LustreFilesystem(Check):
             ("mount presence", lambda: self._probe_mounts(context, errors)),
             ("filesystem reachability", lambda: self._probe_reachable(context, errors)),
             ("lnet transport", lambda: self._probe_lnet(lnet, errors, warnings, infos)),
-            ("efa mount", lambda: self._probe_efa(lnet, errors, warnings, infos)),
+            ("efa mount", lambda: self._probe_efa(context, lnet, errors, warnings, infos)),
         )
         for label, probe in probes:
             run_probe(label, probe, errors)
@@ -240,6 +267,10 @@ class LustreFilesystem(Check):
         version = lustre.lustre_client_version()
         if version:
             infos.append(self.CLIENT_VERSION.format(version))
+            # The official setup enforces a client-version floor (check_lustre_userspace_ver). Only flag a
+            # version we could parse; an unparseable/absent version is left to the module-availability check.
+            if not lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION):
+                errors.append(self.CLIENT_TOO_OLD.format(version, MIN_LUSTRE_CLIENT_VERSION))
 
     def _probe_mounts(self, context: Context, errors: List[CheckError]) -> None:
         """Fail listing any configured Lustre mount absent from /proc/mounts (a non-hanging check)."""
@@ -290,29 +321,48 @@ class LustreFilesystem(Check):
             infos.append(self.ACTIVE_LNDS.format(", ".join(active)))
             warnings.extend(self._health_warnings(lnet.nets))
 
-        infos.append(self._persistent_conf_info())
-
     def _probe_efa(
         self,
+        context: Context,
         lnet: _LnetSnapshot,
         errors: List[CheckError],
         warnings: List[CheckWarning],
         infos: List[CheckInfo],
     ) -> None:
-        """Detect the two EFA-for-Lustre root causes: under-bound devices and a dead EFA data path.
+        """Detect the EFA-for-Lustre root causes, after verifying the EFA prerequisites are in place.
 
-        Acts only when EFA-for-Lustre is expected (an ``@efa`` LNet net is configured); otherwise it is a
-        no-op so non-EFA clusters do not see spurious findings. Automates the FSx tutorial's "Validate FSx
-        with EFA is working" commands (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the
-        client-side import state, to name -- not fix -- the failures. Read-only: never re-binds devices or
-        edits the security group.
+        Acts only when EFA-for-Lustre is *expected* -- either an ``@efa`` LNet net is already configured,
+        or an OnNodeStart custom action wires the EFA-Lustre config script (a config-derived signal,
+        independent of the ``@efa`` net we are validating). On a non-EFA cluster it is a no-op.
+
+        When expected, it first verifies the prerequisites the official ``configure-efa-fsx-lustre-client``
+        script enforces before configuring EFA -- the ``kefalnd`` module (the installer's own definition of
+        "the client supports EFA"), the EFA driver version, and on p6+ the kefalnd version -- and the
+        systemd service that persists the LNet config across reboots. A missing ``kefalnd`` short-circuits
+        the data-path probes: without it there can be no working ``@efa`` net, so the follow-on probes would
+        add nothing. Then it automates the FSx tutorial's "Validate FSx with EFA is working" commands
+        (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the client-side import state, to
+        name -- not fix -- the failures. Read-only: never re-binds devices or edits the security group.
         """
         if lnet.timed_out:
             # The LNet probe already reported the hang; there is nothing to inspect here.
             return
         efa_net = lustre.lnet_net(lnet.nets, EFA_LNET_NET)
+        if efa_net is None and not lustre.efa_lustre_custom_action_configured(context):
+            # EFA-for-Lustre is neither configured in LNet nor requested via a custom action: not expected.
+            return
+
+        # Prerequisites first (mirrors the official script's ordering). A missing kefalnd means the client
+        # cannot ride EFA at all, so we report that root cause and stop before the data-path probes.
+        if not self._probe_efa_prerequisites(context, errors, infos):
+            return
+
+        # The systemd service is how this delivery vehicle persists the EFA/LNet config across reboots.
+        self._probe_efa_service(errors, infos)
+
         if efa_net is None:
-            # EFA-for-Lustre is not configured on this node; nothing to check.
+            # EFA is expected (custom action) but no @efa net is configured yet -- the prerequisite/service
+            # findings above already localize why; there is no live net to probe for devices/traffic.
             return
 
         bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
@@ -328,6 +378,52 @@ class LustreFilesystem(Check):
         errors.extend(self._efa_ping_errors(lnet.nets))
         warnings.extend(self._tcp_fallback_warnings(lnet.nets))
 
+    def _probe_efa_prerequisites(self, context: Context, errors: List[CheckError], infos: List[CheckInfo]) -> bool:
+        """Verify the EFA-for-Lustre client prerequisites; return whether kefalnd is present.
+
+        A False return (kefalnd missing) means the client fundamentally cannot ride EFA, so the caller
+        skips the data-path probes. The EFA driver and (on p6+) kefalnd version floors are reported here
+        too, matching the official script's ``check_efa_driver_ver`` / ``check_kefalnd_ver``.
+        """
+        if not lustre.efa_lnd_supported():
+            errors.append(self.KEFALND_MISSING)
+            return False
+
+        driver_version = lustre.efa_driver_version()
+        if driver_version:
+            infos.append(self.EFA_DRIVER_VERSION.format(driver_version))
+            if not lustre.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION):
+                errors.append(self.EFA_DRIVER_TOO_OLD.format(driver_version, MIN_EFA_DRIVER_VERSION))
+
+        kefalnd_version = lustre.efa_lnd_version()
+        if kefalnd_version:
+            infos.append(self.KEFALND_VERSION.format(kefalnd_version))
+            # The kefalnd version floor applies only to p6+ instances (the script's P6PLUS_INSTACES_PREFIX).
+            if lustre.is_p6plus_instance(context.instance_type) and not lustre.version_at_least(
+                kefalnd_version, MIN_KEFALND_VERSION_P6
+            ):
+                errors.append(
+                    self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type)
+                )
+        return True
+
+    def _probe_efa_service(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
+        """Report the state of the EFA-Lustre systemd service that persists the LNet config across reboots.
+
+        Failed -> error (LNet was not configured for EFA); installed and not failed -> info; not installed
+        -> info (LNet is configured at runtime by the bootstrap script rather than this service). This
+        replaces the old ``/etc/lnet.conf`` probe: the AWSSimbaLustreClientConfigs delivery vehicle does
+        not use ``lnet.conf`` -- it persists via ``configure-efa-fsx-lustre-client.service`` (re-run each
+        boot) and ``/etc/modprobe.d/modprobe.conf``.
+        """
+        service = EFA_LUSTRE_SYSTEMD_SERVICE
+        if not services.systemd_unit_exists(service):
+            infos.append(self.EFA_SERVICE_ABSENT.format(service))
+        elif services.systemd_unit_failed(service):
+            errors.append(self.EFA_SERVICE_FAILED.format(service, service))
+        else:
+            infos.append(self.EFA_SERVICE_ACTIVE.format(service))
+
     def _health_warnings(self, nets) -> List[CheckWarning]:
         """Return a warning per NI whose health value has decayed below the healthy maximum (1000)."""
         warnings: List[CheckWarning] = []
@@ -336,12 +432,6 @@ class LustreFilesystem(Check):
                 if ni.health_value is not None and ni.health_value < 1000:
                     warnings.append(self.HEALTH_DEGRADED.format(ni.nid, net.net_type, ni.health_value))
         return warnings
-
-    def _persistent_conf_info(self) -> CheckInfo:
-        """Return a CheckInfo noting whether the persistent LNet config file is present."""
-        if os.path.exists(LNET_PERSISTENT_CONF_PATH):
-            return self.PERSISTENT_CONF_PRESENT.format(LNET_PERSISTENT_CONF_PATH)
-        return self.PERSISTENT_CONF_ABSENT.format(LNET_PERSISTENT_CONF_PATH)
 
     def _traffic_warnings(self, efa_net) -> List[CheckWarning]:
         """Return a warning per EFA NI that reports zero send and zero receive traffic."""
@@ -365,9 +455,7 @@ class LustreFilesystem(Check):
         if peer_nid is None:
             return []
         source = local[0]
-        timed = time_command(
-            ["lnetctl", "ping", "--source", source, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS
-        )
+        timed = time_command(["lnetctl", "ping", "--source", source, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS)
         if timed.timed_out or timed.returncode != 0:
             return [self.EFA_PING_FAILED.format(source, peer_nid)]
         return []
@@ -412,9 +500,7 @@ class FsxTargetsAreReachable(Check):
     )
     LFS_CHECK_FAILED = CheckError(2, "lfs check servers failed: {}")
     TARGET_UNREACHABLE = CheckError(3, "target {} is unreachable (lfs check servers: {}).")
-    IMPORT_NOT_FULL = CheckError(
-        4, "target {} import state is {} (not {}) -- the client is not fully connected."
-    )
+    IMPORT_NOT_FULL = CheckError(4, "target {} import state is {} (not {}) -- the client is not fully connected.")
     FAILOVER_PINNED = CheckInfo(
         1,
         "target {} current_connection {} equals its failover_nids -- no distinct failover NID "

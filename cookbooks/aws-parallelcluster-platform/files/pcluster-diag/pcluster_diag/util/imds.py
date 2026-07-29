@@ -42,7 +42,7 @@ def get_instance_id() -> str:
 
 
 def get_instance_type() -> str:
-    """Return the EC2 instance type of the current instance (e.g. ``p6-b300.48xlarge``), from IMDSv2."""
+    """Return the EC2 instance type of the current instance (e.g. ``t3.xlarge``), from IMDSv2."""
     token = fetch_token()
     return _get(_INSTANCE_TYPE_URL, token)
 

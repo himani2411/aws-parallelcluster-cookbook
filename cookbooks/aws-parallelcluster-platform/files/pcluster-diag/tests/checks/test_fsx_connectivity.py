@@ -35,6 +35,11 @@ _PROC_MOUNTS_BOTH = """\
 
 _PROC_MOUNTS_ONLY_FSX = "10.0.0.1@tcp:/a /fsx lustre rw 0 0\n"
 
+# Placeholder instance types for the family-gate tests. The p6+ one only needs to start with a known p6+
+# family prefix (the gate matches on prefix), and the non-p6 one only needs to not; neither is a real size.
+_FAKE_P6PLUS_INSTANCE_TYPE = "p6-b200.fake"
+_FAKE_NON_P6_INSTANCE_TYPE = "fake.large"
+
 
 def _timed(returncode=0, stdout="", stderr="", timed_out=False, elapsed=0.01):
     return TimedCommand(
@@ -149,6 +154,25 @@ def test_client_modules_available_but_not_loaded_fails(monkeypatch):
     assert _codes(errors) == [LustreFilesystem.MODULES_NOT_LOADED.code]
     # The error names the specific modules that are available but not loaded.
     assert "lustre" in errors[0].message and "lnet" in errors[0].message
+
+
+def test_client_too_old_version_fails(monkeypatch):
+    _patch_client(monkeypatch, version="2.14.0")
+    errors, infos = [], []
+
+    LustreFilesystem()._probe_client(errors, infos)
+
+    assert LustreFilesystem.CLIENT_TOO_OLD.code in _codes(errors)
+
+
+def test_client_unparseable_version_does_not_flag_too_old(monkeypatch):
+    # An unparseable (but present) version must not be reported as too-old; it is left to the module check.
+    _patch_client(monkeypatch, version="unknown")
+    errors, infos = [], []
+
+    LustreFilesystem()._probe_client(errors, infos)
+
+    assert LustreFilesystem.CLIENT_TOO_OLD.code not in _codes(errors)
 
 
 # --- mount-presence probe -------------------------------------------------------------
@@ -473,26 +497,9 @@ def test_lnet_health_decay_is_warning(monkeypatch):
 
 # --- EFA-mount probe ------------------------------------------------------------------
 
-# A cluster config whose HeadNode OnNodeStart custom action wires the EFA-Lustre client config script,
-# so EFA-for-Lustre is "expected" even before an @efa net is configured.
-_EFA_CUSTOM_ACTION_CONFIG = {
-    "HeadNode": {
-        "CustomActions": {
-            "OnNodeStart": {"Script": "s3://bucket/configure-efa-fsx-lustre-client/setup.sh"},
-        }
-    }
-}
 
-
-def _context_with_efa_action(node_type=NodeType.COMPUTE):
-    """Return a Lustre context whose OnNodeStart custom action references the EFA-Lustre config script."""
-    context = sample_context_with_lustre(node_type)
-    context.cluster_config = dict(context.cluster_config, **_EFA_CUSTOM_ACTION_CONFIG)
-    return context
-
-
-def test_efa_probe_noop_without_efa_net_or_custom_action(monkeypatch):
-    # No @efa net and no EFA-Lustre custom action: EFA is not expected, so the probe records nothing.
+def test_efa_probe_noop_without_efa_net(monkeypatch):
+    # No @efa net configured on this node: EFA is not expected here, so the probe records nothing.
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -635,16 +642,6 @@ def test_efa_missing_kefalnd_fails_and_skips_data_path(monkeypatch):
     assert _codes(errors) == [LustreFilesystem.KEFALND_MISSING.code]
 
 
-def test_efa_expected_via_custom_action_without_efa_net_reports_prereqs(monkeypatch):
-    # No @efa net, but a custom action wires the EFA-Lustre script -> EFA is expected: prereqs are checked.
-    _patch_efa_prereqs(monkeypatch, kefalnd_available=False)
-    errors, warnings, infos = [], [], []
-
-    LustreFilesystem()._probe_efa(_context_with_efa_action(), _snapshot(_LNET_TCP_ONLY), errors, warnings, infos)
-
-    assert _codes(errors) == [LustreFilesystem.KEFALND_MISSING.code]
-
-
 def test_efa_driver_too_old_fails(monkeypatch):
     _patch_efa_prereqs(monkeypatch, efa_driver_version="2.10.0")
     _route_time_command(
@@ -671,16 +668,54 @@ def test_efa_kefalnd_too_old_only_on_p6(monkeypatch):
     monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
 
     p6 = sample_context_with_lustre(NodeType.COMPUTE)
-    p6.instance_type = "p6-b300.48xlarge"
+    p6.instance_type = _FAKE_P6PLUS_INSTANCE_TYPE
     errors, warnings, infos = [], [], []
     LustreFilesystem()._probe_efa(p6, _snapshot(_LNET_TCP_EFA), errors, warnings, infos)
     assert LustreFilesystem.KEFALND_TOO_OLD.code in _codes(errors)
 
     non_p6 = sample_context_with_lustre(NodeType.COMPUTE)
-    non_p6.instance_type = "c5n.18xlarge"
+    non_p6.instance_type = _FAKE_NON_P6_INSTANCE_TYPE
     errors, warnings, infos = [], [], []
     LustreFilesystem()._probe_efa(non_p6, _snapshot(_LNET_TCP_EFA), errors, warnings, infos)
     assert LustreFilesystem.KEFALND_TOO_OLD.code not in _codes(errors)
+
+
+def test_efa_unknown_instance_type_warns_and_skips_kefalnd_floor(monkeypatch):
+    # Instance type unknown (IMDS failed at startup): the p6+ kefalnd floor cannot be evaluated. The probe
+    # must warn that the check was skipped rather than flag a too-old error or silently pass.
+    _patch_efa_prereqs(monkeypatch, kefalnd_version="1.0.0")
+    _route_time_command(
+        monkeypatch,
+        {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    unknown = sample_context_with_lustre(NodeType.COMPUTE)
+    unknown.instance_type = None
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(unknown, _snapshot(_LNET_TCP_EFA), errors, warnings, infos)
+
+    assert LustreFilesystem.INSTANCE_TYPE_UNKNOWN.code in _codes(warnings)
+    assert LustreFilesystem.KEFALND_TOO_OLD.code not in _codes(errors)
+
+
+def test_efa_driver_version_unparseable_warns_not_errors(monkeypatch):
+    # A present-but-unparseable EFA driver version is surfaced as a skipped check, not a too-old error.
+    _patch_efa_prereqs(monkeypatch, efa_driver_version="unknown")
+    _route_time_command(
+        monkeypatch,
+        {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(
+        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_TCP_EFA), errors, warnings, infos
+    )
+
+    assert LustreFilesystem.EFA_DRIVER_VERSION_UNKNOWN.code in _codes(warnings)
+    assert LustreFilesystem.EFA_DRIVER_TOO_OLD.code not in _codes(errors)
 
 
 def test_efa_service_failed_is_error(monkeypatch):

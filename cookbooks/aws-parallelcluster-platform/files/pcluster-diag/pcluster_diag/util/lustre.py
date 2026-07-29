@@ -29,7 +29,6 @@ from pcluster_diag.core.constants import (
     EFA_LND_KERNEL_MODULE,
     P6PLUS_INSTANCE_PREFIXES,
 )
-from pcluster_diag.models.context import Context
 from pcluster_diag.util import kernel_module
 
 logger = logging.getLogger(__name__)
@@ -120,9 +119,10 @@ def lustre_client_version() -> Optional[str]:
 def efa_lnd_supported() -> bool:
     """Return whether the Lustre client supports EFA, i.e. the ``kefalnd`` module is available.
 
-    This mirrors the official installer's definition of EFA support
-    (AWSSimbaLustreClientConfigs ``verify_lustre_supports_efa`` runs ``modinfo kefalnd``): a Lustre
-    client with no ``kefalnd`` module cannot ride EFA no matter how LNet is configured.
+    This mirrors the official FSx EFA-Lustre client setup's definition of EFA support (it verifies that
+    ``modinfo kefalnd`` succeeds): a Lustre client with no ``kefalnd`` module cannot ride EFA no matter how
+    LNet is configured. See
+    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
     """
     return kernel_module.kernel_module_available(EFA_LND_KERNEL_MODULE)
 
@@ -137,27 +137,36 @@ def efa_lnd_version() -> Optional[str]:
     return kernel_module.module_version(EFA_LND_KERNEL_MODULE)
 
 
-def is_p6plus_instance(instance_type: Optional[str]) -> bool:
+def is_p6plus_instance(instance_type: Optional[str]) -> Optional[bool]:
     """Return whether ``instance_type`` is a p6+ family requiring the kefalnd version check.
 
-    Mirrors the official script's ``P6PLUS_INSTACES_PREFIX`` gate (``p6-b200``/``p6e-gb200``/``p6-b300``):
-    the kefalnd minimum-version requirement applies only to these families.
+    Returns True/False for a known instance type, and ``None`` when the instance type is unknown (e.g. IMDS
+    could not be reached at context-build time). ``None`` lets the caller distinguish "known non-p6" (skip
+    the p6-only kefalnd version floor cleanly) from "could not determine the family" (report that the check
+    was skipped for lack of the instance type), rather than silently treating an unknown type as non-p6.
+
+    The kefalnd minimum-version requirement applies only to the p6+ families (see
+    ``P6PLUS_INSTANCE_PREFIXES``). See
+    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
     """
     if not instance_type:
-        return False
+        return None
     return any(instance_type.startswith(prefix) for prefix in P6PLUS_INSTANCE_PREFIXES)
 
 
-def version_at_least(actual: Optional[str], minimum: str) -> bool:
-    """Return whether dotted version ``actual`` is >= ``minimum`` (missing/unparseable ``actual`` is False).
+def version_at_least(actual: Optional[str], minimum: str) -> Optional[bool]:
+    """Return whether dotted version ``actual`` is >= ``minimum``, or ``None`` when it cannot be determined.
 
-    Only the numeric dotted prefix is compared (e.g. ``2.15.6-1.fsx23`` -> ``[2, 15, 6]``), matching the
-    official script's ``version_check`` which strips non-numeric characters before comparing.
+    Returns True/False for a comparable ``actual``, and ``None`` when ``actual`` is missing or unparseable
+    (rather than conflating "could not determine the version" with "below the minimum"). This lets the
+    caller surface an unparseable version as a skipped/undeterminable check instead of a false too-old
+    error. Only the numeric dotted prefix is compared (e.g. ``2.15.6-1.fsx23`` -> ``[2, 15, 6]``), matching
+    the official setup's version check which strips non-numeric characters before comparing.
     """
     parsed_actual = _numeric_version(actual)
     parsed_min = _numeric_version(minimum)
     if parsed_actual is None or parsed_min is None:
-        return False
+        return None
     length = max(len(parsed_actual), len(parsed_min))
     parsed_actual += [0] * (length - len(parsed_actual))
     parsed_min += [0] * (length - len(parsed_min))
@@ -172,47 +181,6 @@ def _numeric_version(version: Optional[str]) -> Optional[List[int]]:
     if not match:
         return None
     return [int(part) for part in match.group(1).split(".")]
-
-
-def efa_lustre_custom_action_configured(context: Context) -> bool:
-    """Return whether an OnNodeStart custom action references the EFA-Lustre client config script.
-
-    Scans the cluster configuration's HeadNode and every Scheduling queue for an ``OnNodeStart`` custom
-    action whose ``Script`` names the EFA-Lustre config script (see ``EFA_LUSTRE_CONFIG_SCRIPT_MARKER``).
-    This is a config-derived "EFA-for-Lustre is expected here" signal, independent of the ``@efa`` LNet
-    net we are trying to validate.
-    """
-    from pcluster_diag.core.constants import EFA_LUSTRE_CONFIG_SCRIPT_MARKER
-
-    config = context.cluster_config or {}
-    for actions in _custom_action_blocks(config):
-        if _on_node_start_references(actions, EFA_LUSTRE_CONFIG_SCRIPT_MARKER):
-            return True
-    return False
-
-
-def _custom_action_blocks(config: dict) -> List[dict]:
-    """Return every ``CustomActions`` mapping in the cluster config (HeadNode + all Scheduling queues)."""
-    blocks: List[dict] = []
-    head_node = config.get("HeadNode")
-    if isinstance(head_node, dict) and isinstance(head_node.get("CustomActions"), dict):
-        blocks.append(head_node["CustomActions"])
-    scheduling = config.get("Scheduling")
-    if isinstance(scheduling, dict):
-        for queue in scheduling.get("SlurmQueues") or []:
-            if isinstance(queue, dict) and isinstance(queue.get("CustomActions"), dict):
-                blocks.append(queue["CustomActions"])
-    return blocks
-
-
-def _on_node_start_references(custom_actions: dict, marker: str) -> bool:
-    """Return whether ``custom_actions``' ``OnNodeStart`` (single or list) has a Script naming ``marker``."""
-    on_node_start = custom_actions.get("OnNodeStart")
-    entries = on_node_start if isinstance(on_node_start, list) else [on_node_start]
-    for entry in entries:
-        if isinstance(entry, dict) and marker in str(entry.get("Script") or ""):
-            return True
-    return False
 
 
 # --- lnetctl net show parsing ---------------------------------------------------------

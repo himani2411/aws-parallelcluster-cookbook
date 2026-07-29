@@ -267,8 +267,6 @@ def test_parse_lctl_import_empty_when_no_blocks():
 
 import pytest  # noqa: E402
 
-from pcluster_diag.models.context import Context, NodeType  # noqa: E402
-
 
 @pytest.mark.parametrize(
     "actual, minimum, expected",
@@ -280,8 +278,9 @@ from pcluster_diag.models.context import Context, NodeType  # noqa: E402
         ("1.1.1", "1.1.1", True),
         ("1.0.0", "1.1.1", False),
         ("2.12.1", "2.12.1", True),
-        (None, "2.15", False),  # missing version is not "at least"
-        ("not-a-version", "2.15", False),
+        # A version that cannot be determined yields None (undeterminable), not False (below-minimum).
+        (None, "2.15", None),
+        ("not-a-version", "2.15", None),
     ],
 )
 def test_version_at_least(actual, minimum, expected):
@@ -296,60 +295,13 @@ def test_version_at_least(actual, minimum, expected):
         ("p6e-gb200.36xlarge", True),
         ("p5.48xlarge", False),
         ("c5n.18xlarge", False),
-        ("", False),
-        (None, False),
+        # An unknown instance type (e.g. IMDS unavailable at startup) is undeterminable, not "non-p6".
+        ("", None),
+        (None, None),
     ],
 )
 def test_is_p6plus_instance(instance_type, expected):
     assert lustre.is_p6plus_instance(instance_type) is expected
-
-
-def _context(cluster_config):
-    return Context(
-        timestamp="t",
-        pcluster_diag_version="1.0.0",
-        pcluster_version="3.16.0",
-        instance_id="i-0",
-        instance_type="c5n.18xlarge",
-        node_type=NodeType.COMPUTE,
-        cluster_config=cluster_config,
-        dna_json={},
-        head_node_instance_id="i-0",
-    )
-
-
-def test_efa_lustre_custom_action_configured_head_node_single():
-    config = {
-        "HeadNode": {"CustomActions": {"OnNodeStart": {"Script": "s3://b/configure-efa-fsx-lustre-client/setup.sh"}}}
-    }
-    assert lustre.efa_lustre_custom_action_configured(_context(config)) is True
-
-
-def test_efa_lustre_custom_action_configured_queue_list():
-    config = {
-        "Scheduling": {
-            "SlurmQueues": [
-                {
-                    "CustomActions": {
-                        "OnNodeStart": [
-                            {"Script": "s3://b/other.sh"},
-                            {"Script": "x/configure-efa-fsx-lustre-client/setup.sh"},
-                        ]
-                    }
-                }
-            ]
-        }
-    }
-    assert lustre.efa_lustre_custom_action_configured(_context(config)) is True
-
-
-def test_efa_lustre_custom_action_absent_when_unrelated_script():
-    config = {"HeadNode": {"CustomActions": {"OnNodeStart": {"Script": "s3://b/post_install.sh"}}}}
-    assert lustre.efa_lustre_custom_action_configured(_context(config)) is False
-
-
-def test_efa_lustre_custom_action_absent_when_no_custom_actions():
-    assert lustre.efa_lustre_custom_action_configured(_context({"Region": "us-east-1"})) is False
 
 
 def test_efa_lnd_supported_delegates_to_modinfo(monkeypatch):

@@ -170,9 +170,9 @@ def test_instance_id_reads_from_imds(monkeypatch):
 
 
 def test_instance_type_reads_from_imds(monkeypatch):
-    monkeypatch.setattr("pcluster_diag.core.context_builder.imds.get_instance_type", lambda: "p6-b300.48xlarge")
+    monkeypatch.setattr("pcluster_diag.core.context_builder.imds.get_instance_type", lambda: "fake.large")
 
-    assert ContextBuilder()._instance_type() == "p6-b300.48xlarge"
+    assert ContextBuilder()._instance_type() == "fake.large"
 
 
 def test_instance_type_returns_none_and_logs_on_error(monkeypatch, caplog):

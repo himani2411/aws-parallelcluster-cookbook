@@ -24,7 +24,7 @@ executes each probe in isolation and aggregates their findings. The probes are:
 
 - **client** -- the ``lustre``/``lnet`` kernel modules are available for the running kernel (so a broken
   client is reported as its own root cause) and loaded, plus the client version as info, and -- when the
-  client version is known -- that it meets the minimum the official installer enforces;
+  client version is known -- that it meets the minimum the official FSx EFA-Lustre client setup enforces;
 - **mount presence** -- each configured Lustre ``MountDir`` is actually mounted (a cheap, non-hanging
   ``/proc/mounts`` check, so "not mounted" is not misreported downstream as "unreachable");
 - **filesystem reachability** -- ``lfs df -h`` per mount (the FSx-team-recommended first-line command),
@@ -33,12 +33,13 @@ executes each probe in isolation and aggregates their findings. The probes are:
   EFA-vs-TCP transport state at the heart of the connectivity tickets;
 - **EFA mount** -- run whenever EFA-for-Lustre is *expected* (an ``@efa`` LNet net is configured, or an
   OnNodeStart custom action wires the EFA-Lustre config script). It first verifies the EFA prerequisites
-  the way the official ``configure-efa-fsx-lustre-client`` script does -- the ``kefalnd`` module (the
-  installer's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on p6+
-  instances, the kefalnd version -- then the systemd service that persists the LNet config across reboots
+  the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that setup's own
+  definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+ instance
+  families, the kefalnd version -- then the systemd service that persists the LNet config across reboots
   (``configure-efa-fsx-lustre-client.service``; this delivery vehicle does not use ``/etc/lnet.conf``),
-  then detects the two root causes from the tickets: under-bound EFA devices (the p6-b300 2-of-16 bug) and
-  a non-working EFA data path (the missing self-referencing security-group rule).
+  then detects the two root causes from the tickets: under-bound EFA devices (the family-specific
+  device-binding bug) and a non-working EFA data path (the missing self-referencing security-group rule).
+  See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
 (``approval_required``) deep probe (``lfs check servers`` + per-target import state); the framework's
@@ -56,6 +57,7 @@ from typing import List
 
 from pcluster_diag.core.constants import (
     EFA_INFINIBAND_SYSFS,
+    EFA_LND_KERNEL_MODULE,
     EFA_LNET_NET,
     EFA_LUSTRE_SYSTEMD_SERVICE,
     FSX_EFA_PING_TIMEOUT_SECONDS,
@@ -155,8 +157,8 @@ class LustreFilesystem(Check):
     )
     UNDERBOUND_DEVICES = CheckError(
         10,
-        "Only {} of {} EFA devices are bound to LNet -- Lustre will fall back to TCP "
-        "(matches the p6-b300 2-of-16 bug). Re-run the EFA-Lustre client configuration.",
+        "Only {} of {} EFA devices are bound to LNet -- Lustre will fall back to TCP. "
+        "Re-run the EFA-Lustre client configuration.",
     )
     EFA_PING_FAILED = CheckError(
         11,
@@ -188,6 +190,17 @@ class LustreFilesystem(Check):
         "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
     )
     TCP_FALLBACK = CheckWarning(3, "target {} is connected over @tcp despite EFA being configured (TCP fallback).")
+    INSTANCE_TYPE_UNKNOWN = CheckWarning(
+        4,
+        "The instance type could not be determined (an IMDS error at startup): the p6+ kefalnd "
+        "minimum-version check ({} >= {}) was skipped.",
+    )
+    EFA_DRIVER_VERSION_UNKNOWN = CheckWarning(
+        5, "The EFA driver version could not be determined: the minimum-version check (>= {}) was skipped."
+    )
+    KEFALND_VERSION_UNKNOWN = CheckWarning(
+        6, "The kefalnd version could not be determined: the p6+ minimum-version check (>= {}) was skipped."
+    )
 
     # --- Infos --------------------------------------------------------------------------------
     CLIENT_VERSION = CheckInfo(1, "Lustre client version: {}.")
@@ -240,10 +253,10 @@ class LustreFilesystem(Check):
         ``-v`` is used so per-NI statistics and health values are available; the non-verbose fields (net
         type, nid, interfaces) are a subset, so one verbose call serves both probes.
         """
-        timed = time_command(["lnetctl", "net", "show", "-v"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
-        if timed.timed_out:
+        result = time_command(["lnetctl", "net", "show", "-v"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
+        if result.timed_out:
             return _LnetSnapshot(timed_out=True)
-        nets = lustre.parse_lnet_net_show(timed.stdout) if timed.returncode == 0 else []
+        nets = lustre.parse_lnet_net_show(result.stdout) if result.returncode == 0 else []
         return _LnetSnapshot(timed_out=False, nets=nets)
 
     def _probe_client(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
@@ -267,9 +280,10 @@ class LustreFilesystem(Check):
         version = lustre.lustre_client_version()
         if version:
             infos.append(self.CLIENT_VERSION.format(version))
-            # The official setup enforces a client-version floor (check_lustre_userspace_ver). Only flag a
-            # version we could parse; an unparseable/absent version is left to the module-availability check.
-            if not lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION):
+            # The official setup enforces a client-version floor. version_at_least returns None when the
+            # version string is unparseable: only flag CLIENT_TOO_OLD on a definite below-minimum result,
+            # never on an undeterminable one (that is left to the module-availability check).
+            if lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION) is False:
                 errors.append(self.CLIENT_TOO_OLD.format(version, MIN_LUSTRE_CLIENT_VERSION))
 
     def _probe_mounts(self, context: Context, errors: List[CheckError]) -> None:
@@ -331,39 +345,37 @@ class LustreFilesystem(Check):
     ) -> None:
         """Detect the EFA-for-Lustre root causes, after verifying the EFA prerequisites are in place.
 
-        Acts only when EFA-for-Lustre is *expected* -- either an ``@efa`` LNet net is already configured,
-        or an OnNodeStart custom action wires the EFA-Lustre config script (a config-derived signal,
-        independent of the ``@efa`` net we are validating). On a non-EFA cluster it is a no-op.
+        Acts only when EFA-for-Lustre is *expected* on this node, i.e. an ``@efa`` LNet net is configured.
+        We deliberately do not infer "expected" from the cluster config's OnNodeStart custom actions: the
+        config carries the actions for every node type (HeadNode, each queue, each login pool), and mapping
+        those back to *this* node is unreliable, so the on-node ``@efa`` net is the ground truth. On a
+        non-EFA node this is a no-op.
 
-        When expected, it first verifies the prerequisites the official ``configure-efa-fsx-lustre-client``
-        script enforces before configuring EFA -- the ``kefalnd`` module (the installer's own definition of
-        "the client supports EFA"), the EFA driver version, and on p6+ the kefalnd version -- and the
-        systemd service that persists the LNet config across reboots. A missing ``kefalnd`` short-circuits
-        the data-path probes: without it there can be no working ``@efa`` net, so the follow-on probes would
-        add nothing. Then it automates the FSx tutorial's "Validate FSx with EFA is working" commands
-        (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the client-side import state, to
-        name -- not fix -- the failures. Read-only: never re-binds devices or edits the security group.
+        When expected, it first verifies the prerequisites the official FSx EFA-Lustre client setup
+        enforces before configuring EFA -- the ``kefalnd`` module (that setup's own definition of "the
+        client supports EFA"), the EFA driver version, and on the p6+ families the kefalnd version -- and
+        the systemd service that persists the LNet config across reboots. A missing ``kefalnd``
+        short-circuits the data-path probes: without it there can be no working ``@efa`` net, so the
+        follow-on probes would add nothing. Then it automates the FSx tutorial's "Validate FSx with EFA is
+        working" commands (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the client-side
+        import state, to name -- not fix -- the failures. Read-only: never re-binds devices or edits the
+        security group.
         """
         if lnet.timed_out:
             # The LNet probe already reported the hang; there is nothing to inspect here.
             return
         efa_net = lustre.lnet_net(lnet.nets, EFA_LNET_NET)
-        if efa_net is None and not lustre.efa_lustre_custom_action_configured(context):
-            # EFA-for-Lustre is neither configured in LNet nor requested via a custom action: not expected.
+        if efa_net is None:
+            # No @efa net configured on this node: EFA-for-Lustre is not expected here; nothing to check.
             return
 
-        # Prerequisites first (mirrors the official script's ordering). A missing kefalnd means the client
+        # Prerequisites first (mirrors the official setup's ordering). A missing kefalnd means the client
         # cannot ride EFA at all, so we report that root cause and stop before the data-path probes.
-        if not self._probe_efa_prerequisites(context, errors, infos):
+        if not self._probe_efa_prerequisites(context, errors, warnings, infos):
             return
 
         # The systemd service is how this delivery vehicle persists the EFA/LNet config across reboots.
         self._probe_efa_service(errors, infos)
-
-        if efa_net is None:
-            # EFA is expected (custom action) but no @efa net is configured yet -- the prerequisite/service
-            # findings above already localize why; there is no live net to probe for devices/traffic.
-            return
 
         bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
         available = _efa_device_count()
@@ -378,43 +390,88 @@ class LustreFilesystem(Check):
         errors.extend(self._efa_ping_errors(lnet.nets))
         warnings.extend(self._tcp_fallback_warnings(lnet.nets))
 
-    def _probe_efa_prerequisites(self, context: Context, errors: List[CheckError], infos: List[CheckInfo]) -> bool:
+    def _probe_efa_prerequisites(
+        self,
+        context: Context,
+        errors: List[CheckError],
+        warnings: List[CheckWarning],
+        infos: List[CheckInfo],
+    ) -> bool:
         """Verify the EFA-for-Lustre client prerequisites; return whether kefalnd is present.
 
         A False return (kefalnd missing) means the client fundamentally cannot ride EFA, so the caller
-        skips the data-path probes. The EFA driver and (on p6+) kefalnd version floors are reported here
-        too, matching the official script's ``check_efa_driver_ver`` / ``check_kefalnd_ver``.
+        skips the data-path probes. The EFA driver and (on the p6+ families) kefalnd version floors are
+        reported here too. A version that cannot be determined -- an unparseable module version, or (for the
+        p6+ gate) an instance type IMDS could not report -- is surfaced as a warning noting the check was
+        skipped, never as a false too-old error.
         """
         if not lustre.efa_lnd_supported():
             errors.append(self.KEFALND_MISSING)
             return False
 
-        driver_version = lustre.efa_driver_version()
-        if driver_version:
-            infos.append(self.EFA_DRIVER_VERSION.format(driver_version))
-            if not lustre.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION):
-                errors.append(self.EFA_DRIVER_TOO_OLD.format(driver_version, MIN_EFA_DRIVER_VERSION))
+        self._check_efa_driver_version(errors, warnings, infos)
+        self._check_kefalnd_version(context, errors, warnings, infos)
+        return True
 
+    def _check_efa_driver_version(
+        self, errors: List[CheckError], warnings: List[CheckWarning], infos: List[CheckInfo]
+    ) -> None:
+        """Report the EFA driver version and flag it only when it is definitely below the minimum."""
+        driver_version = lustre.efa_driver_version()
+        if not driver_version:
+            warnings.append(self.EFA_DRIVER_VERSION_UNKNOWN.format(MIN_EFA_DRIVER_VERSION))
+            return
+        infos.append(self.EFA_DRIVER_VERSION.format(driver_version))
+        at_least = lustre.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION)
+        if at_least is None:
+            # Present but unparseable -- surface that the floor check was skipped, do not assume too-old.
+            warnings.append(self.EFA_DRIVER_VERSION_UNKNOWN.format(MIN_EFA_DRIVER_VERSION))
+        elif at_least is False:
+            errors.append(self.EFA_DRIVER_TOO_OLD.format(driver_version, MIN_EFA_DRIVER_VERSION))
+
+    def _check_kefalnd_version(
+        self,
+        context: Context,
+        errors: List[CheckError],
+        warnings: List[CheckWarning],
+        infos: List[CheckInfo],
+    ) -> None:
+        """Report the kefalnd version and, on the p6+ families only, flag it when definitely below the floor.
+
+        The p6+ gate needs the instance type. When it is unknown (IMDS could not report it at startup),
+        is_p6plus_instance returns None: we cannot tell whether the p6+ floor applies, so we surface a
+        warning that the check was skipped rather than silently passing.
+        """
         kefalnd_version = lustre.efa_lnd_version()
         if kefalnd_version:
             infos.append(self.KEFALND_VERSION.format(kefalnd_version))
-            # The kefalnd version floor applies only to p6+ instances (the script's P6PLUS_INSTACES_PREFIX).
-            if lustre.is_p6plus_instance(context.instance_type) and not lustre.version_at_least(
-                kefalnd_version, MIN_KEFALND_VERSION_P6
-            ):
-                errors.append(
-                    self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type)
-                )
-        return True
+
+        p6plus = lustre.is_p6plus_instance(context.instance_type)
+        if p6plus is None:
+            warnings.append(self.INSTANCE_TYPE_UNKNOWN.format(EFA_LND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
+            return
+        if not p6plus:
+            # Known non-p6 family: the kefalnd version floor does not apply.
+            return
+
+        # p6+ family: the floor applies.
+        if not kefalnd_version:
+            warnings.append(self.KEFALND_VERSION_UNKNOWN.format(MIN_KEFALND_VERSION_P6))
+            return
+        at_least = lustre.version_at_least(kefalnd_version, MIN_KEFALND_VERSION_P6)
+        if at_least is None:
+            warnings.append(self.KEFALND_VERSION_UNKNOWN.format(MIN_KEFALND_VERSION_P6))
+        elif at_least is False:
+            errors.append(self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type))
 
     def _probe_efa_service(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
         """Report the state of the EFA-Lustre systemd service that persists the LNet config across reboots.
 
         Failed -> error (LNet was not configured for EFA); installed and not failed -> info; not installed
         -> info (LNet is configured at runtime by the bootstrap script rather than this service). This
-        replaces the old ``/etc/lnet.conf`` probe: the AWSSimbaLustreClientConfigs delivery vehicle does
-        not use ``lnet.conf`` -- it persists via ``configure-efa-fsx-lustre-client.service`` (re-run each
-        boot) and ``/etc/modprobe.d/modprobe.conf``.
+        replaces the old ``/etc/lnet.conf`` probe: the FSx EFA-Lustre client delivery vehicle does not use
+        ``lnet.conf`` -- it persists via ``configure-efa-fsx-lustre-client.service`` (re-run each boot) and
+        ``/etc/modprobe.d/modprobe.conf``.
         """
         service = EFA_LUSTRE_SYSTEMD_SERVICE
         if not services.systemd_unit_exists(service):

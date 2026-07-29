@@ -26,7 +26,7 @@ SAMPLE_PCLUSTER_VERSION = "3.16.0"
 SAMPLE_PCLUSTER_DIAG_VERSION = "1.0.0"
 SAMPLE_INSTANCE_ID = "i-0123456789abcdef0"
 SAMPLE_HEAD_NODE_INSTANCE_ID = "i-000000000headnode"
-SAMPLE_INSTANCE_TYPE = "c5n.18xlarge"
+SAMPLE_INSTANCE_TYPE = "fake.large"
 SAMPLE_CLUSTER_CONFIG = {"Region": "us-east-1"}
 
 # Two FsxLustre SharedStorage mounts, mirroring the recursive-prod-gpu cluster (/fsx and /fsx-efa).

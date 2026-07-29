@@ -38,7 +38,7 @@ class Context:
         pcluster_diag_version: The pcluster-diag package version (``1.0.0`` initially).
         pcluster_version: The installed ParallelCluster version.
         instance_id: The id of the instance the tool is running on, or None if it cannot be determined.
-        instance_type: The EC2 instance type the tool runs on (e.g. ``p6-b300.48xlarge``), or None if it
+        instance_type: The EC2 instance type the tool runs on (e.g. ``t3.xlarge``), or None if it
             cannot be determined. Used to gate instance-family-specific checks (e.g. the p6+ kefalnd
             version requirement).
         node_type: The node type the tool runs on (HEAD, COMPUTE, or LOGIN).

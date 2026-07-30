@@ -200,7 +200,9 @@ class LustreFilesystem(Check):
     )
     NO_TRAFFIC = CheckWarning(
         2,
-        "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
+        "EFA LNet interface {} shows no traffic yet (send_count=0, recv_count=0). This is expected on an "
+        "idle or freshly-booted node; if the node has been driving filesystem I/O it may indicate a silent "
+        "TCP fallback.",
     )
     TCP_FALLBACK = CheckWarning(3, "target {} is connected over @tcp despite EFA being configured (TCP fallback).")
 
@@ -503,7 +505,11 @@ class LustreFilesystem(Check):
         return warnings
 
     def _traffic_warnings(self, efa_net) -> List[CheckWarning]:
-        """Return a warning per EFA NI that reports zero send and zero receive traffic."""
+        """Return a warning per EFA NI that reports zero send and zero receive traffic.
+
+        This is a single-shot counter snapshot, so zero traffic is expected on an idle or freshly-booted
+        node -- the warning is worded as "no traffic yet" and stays a non-fatal warning for that reason.
+        """
         warnings: List[CheckWarning] = []
         for ni in efa_net.local_nis:
             if ni.send_count == 0 and ni.recv_count == 0:

@@ -53,12 +53,28 @@ def efa_kefalnd_version() -> Optional[str]:
 
 
 def efa_device_count() -> int:
-    """Return the number of EFA/RDMA devices exposed under ``/sys/class/infiniband`` (0 when none)."""
+    """Return the number of EFA devices exposed under ``/sys/class/infiniband`` (0 when none).
+
+    Only devices whose ``device/driver`` resolves to ``efa`` are counted. ``/sys/class/infiniband`` can
+    also hold non-EFA RDMA devices, so a bare directory listing would over-count; filtering by driver
+    mirrors how the official EFA-Lustre setup enumerates EFA interfaces.
+    """
     try:
-        return len(os.listdir(EFA_INFINIBAND_SYSFS))
+        entries = os.listdir(EFA_INFINIBAND_SYSFS)
     except OSError as error:
         logger.warning("Could not list %s: %s", EFA_INFINIBAND_SYSFS, error)
         return 0
+    return sum(1 for name in entries if _is_efa_device(name))
+
+
+def _is_efa_device(name: str) -> bool:
+    """Return whether the ``/sys/class/infiniband`` entry ``name`` is backed by the ``efa`` driver."""
+    driver_link = os.path.join(EFA_INFINIBAND_SYSFS, name, "device", "driver")
+    try:
+        return os.path.basename(os.path.realpath(driver_link)) == EFA_DRIVER_KERNEL_MODULE
+    except OSError as error:
+        logger.warning("Could not resolve the driver for %s: %s", name, error)
+        return False
 
 
 def is_p6plus_instance(instance_type: Optional[str]) -> Optional[bool]:

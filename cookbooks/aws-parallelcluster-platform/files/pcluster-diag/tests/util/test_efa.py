@@ -34,9 +34,25 @@ def test_efa_kefalnd_version_delegates_to_modinfo(monkeypatch):
     assert efa.efa_kefalnd_version() == "1.1.1"
 
 
-def test_efa_device_count_counts_infiniband_entries(monkeypatch):
-    monkeypatch.setattr(efa.os, "listdir", lambda path: ["efa0", "efa1", "efa2"])
-    assert efa.efa_device_count() == 3
+def _patch_infiniband(monkeypatch, drivers):
+    """Simulate /sys/class/infiniband: ``drivers`` maps each device name to its resolved driver name.
+
+    ``os.listdir`` returns the device names; ``os.path.realpath`` on ``<dev>/device/driver`` resolves to a
+    path whose basename is the mapped driver (so efa_device_count's driver filter can be exercised).
+    """
+    monkeypatch.setattr(efa.os, "listdir", lambda path: list(drivers))
+    monkeypatch.setattr(efa.os.path, "realpath", lambda link: "/sys/bus/pci/drivers/" + drivers[link.split("/")[-3]])
+
+
+def test_efa_device_count_counts_only_efa_driver_devices(monkeypatch):
+    # Two efa devices and one non-EFA RDMA device (e.g. an ib device) under /sys/class/infiniband.
+    _patch_infiniband(monkeypatch, {"efa0": "efa", "efa1": "efa", "mlx5_0": "mlx5_core"})
+    assert efa.efa_device_count() == 2
+
+
+def test_efa_device_count_zero_when_no_efa_devices(monkeypatch):
+    _patch_infiniband(monkeypatch, {"mlx5_0": "mlx5_core"})
+    assert efa.efa_device_count() == 0
 
 
 def test_efa_device_count_zero_when_sysfs_absent(monkeypatch):
@@ -45,6 +61,18 @@ def test_efa_device_count_zero_when_sysfs_absent(monkeypatch):
 
     monkeypatch.setattr(efa.os, "listdir", _raise)
     assert efa.efa_device_count() == 0
+
+
+def test_efa_device_count_skips_device_whose_driver_is_unreadable(monkeypatch):
+    monkeypatch.setattr(efa.os, "listdir", lambda path: ["efa0", "broken"])
+
+    def _realpath(link):
+        if "broken" in link:
+            raise OSError("dangling symlink")
+        return "/sys/bus/pci/drivers/efa"
+
+    monkeypatch.setattr(efa.os.path, "realpath", _realpath)
+    assert efa.efa_device_count() == 1
 
 
 @pytest.mark.parametrize(

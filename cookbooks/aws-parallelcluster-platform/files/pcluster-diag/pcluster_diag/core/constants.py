@@ -133,12 +133,15 @@ EFA_DRIVER_KERNEL_MODULE = "efa"
 # prerequisite for any EFA-for-Lustre probing, checked before the data-path probes run. See
 # https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 EFA_KEFALND_KERNEL_MODULE = "kefalnd"
-# Minimum versions the official FSx EFA-Lustre client setup enforces before configuring EFA. See
+# Minimum versions the official FSx EFA-Lustre client setup enforces before configuring EFA.
+# NOTE: these mirror values owned by the FSx EFA-Lustre client setup (we cannot import them). If that
+# setup bumps a floor, re-sync the values below or these checks will under/over-report. Source:
 # https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 MIN_EFA_DRIVER_VERSION = "2.12.1"
 MIN_KEFALND_VERSION_P6 = "1.1.1"  # kefalnd floor, enforced on p6+ instances only
 MIN_LUSTRE_CLIENT_VERSION = "2.15"
 # Instance-family prefixes that require the kefalnd version check (the p6+ families).
+# NOTE: also owned by the FSx EFA-Lustre client setup -- re-sync if it adds/renames a p6+ family.
 P6PLUS_INSTANCE_PREFIXES = ("p6-b200", "p6e-gb200", "p6-b300")
 # The systemd oneshot service the FSx EFA-Lustre client setup installs to (re)configure LNet on every
 # boot. Its state is the persistence/health signal for this delivery vehicle.

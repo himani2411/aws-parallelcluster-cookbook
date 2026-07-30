@@ -117,7 +117,8 @@ FSX_OST_QUERY_TIMEOUT_SECONDS = 30
 FSX_EFA_PING_TIMEOUT_SECONDS = 15
 # The StorageType value a FSx for Lustre mount carries in the cluster configuration's SharedStorage.
 LUSTRE_STORAGE_TYPE = "FsxLustre"
-# NFS-based shared-storage types, handled with shallow reachability only (not in scope for PR1).
+# NFS-based shared-storage types. Reserved for a future NFS reachability check (a sibling of the Lustre
+# checks); not consumed yet.
 NFS_STORAGE_TYPES = ("FsxOntap", "FsxOpenZfs", "Efs")
 # The osc/mdc import ``state:`` value indicating a reachable, fully-connected target.
 HEALTHY_TARGET_STATE = "FULL"

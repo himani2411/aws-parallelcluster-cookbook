@@ -27,19 +27,19 @@ executes each probe in isolation and aggregates their findings. The probes are:
   client version is known -- that it meets the minimum the official FSx EFA-Lustre client setup enforces;
 - **mount presence** -- each configured Lustre ``MountDir`` is actually mounted (a cheap, non-hanging
   ``/proc/mounts`` check, so "not mounted" is not misreported downstream as "unreachable");
-- **filesystem reachability** -- ``lfs df -h`` per mount (the FSx-team-recommended first-line command),
+- **filesystem reachability** -- ``lfs df -h`` per mount (the recommended first-line reachability command),
   classifying a hang, an error, or a down target;
 - **LNet transport** -- ``lnetctl net show`` reporting the active LNDs (tcp/efa/o2ib), surfacing the
-  EFA-vs-TCP transport state at the heart of the connectivity tickets;
+  EFA-vs-TCP transport state;
 - **EFA mount** -- run whenever EFA-for-Lustre is *expected* (an ``@efa`` LNet net is configured, or the
   ``configure-efa-fsx-lustre-client`` systemd service is installed on this node). It first verifies the
   EFA prerequisites the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that
   setup's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+
   instance families, the kefalnd version -- then the state of the ``configure-efa-fsx-lustre-client.service``
-  that (re)configures LNet on every boot, then detects the two root causes from the tickets: under-bound
-  EFA devices (the family-specific device-binding bug) and a non-working EFA data path (the missing
-  self-referencing security-group rule).
-  See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+  that (re)configures LNet on every boot, then detects two common root causes: under-bound EFA devices
+  (a device-binding bug where only a subset of the instance's EFA devices are bound to LNet, so Lustre
+  falls back to TCP) and a non-working EFA data path (typically a missing self-referencing security-group
+  rule). See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
 (``approval_required``) deep probe (``lfs check servers`` + per-target import state); the framework's
@@ -558,13 +558,13 @@ class LustreFilesystem(Check):
 
 
 class FsxTargetsAreReachable(Check):
-    """Opt-in deep check pinpointing an unreachable OST/MDT -- the ``ls -al`` hang's exact cause.
+    """Opt-in deep check pinpointing an unreachable OST/MDT -- a common cause of a hung directory listing.
 
-    Runs ``lfs check servers`` (the FSx team's own per-target diagnostic, per ticket V2288024979) via
-    ``time_command`` and inspects client-side import state (``lctl get_param osc.*.import`` /
-    ``mdc.*.import``). Because probing individual targets is heavier and can itself block, this check is
-    gated behind ``approval_required`` so it runs only when the operator opts in (or passes ``--yes``).
-    It is kept separate from :class:`LustreFilesystem` because the approval gate is per-check.
+    Runs ``lfs check servers`` (the per-target reachability diagnostic) via ``time_command`` and inspects
+    client-side import state (``lctl get_param osc.*.import`` / ``mdc.*.import``). Because probing
+    individual targets is heavier and can itself block, this check is gated behind ``approval_required`` so
+    it runs only when the operator opts in (or passes ``--yes``). It is kept separate from
+    :class:`LustreFilesystem` because the approval gate is per-check.
     """
 
     LFS_CHECK_TIMED_OUT = CheckError(

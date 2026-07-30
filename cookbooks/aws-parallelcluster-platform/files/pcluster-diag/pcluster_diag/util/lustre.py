@@ -360,8 +360,7 @@ def parse_lfs_check_servers(output: str) -> List[ServerCheck]:
     """Parse ``lfs check servers`` output into per-target ``ServerCheck`` rows.
 
     ``lfs check servers`` reports each target either as ``<target> active.`` or as an error line such as
-    ``check '<target>': Input/output error (5)`` (per FSx ticket V2288024979). Both shapes are parsed;
-    unrecognized lines are ignored.
+    ``check '<target>': Input/output error (5)``. Both shapes are parsed; unrecognized lines are ignored.
     """
     results: List[ServerCheck] = []
     for raw in output.splitlines():

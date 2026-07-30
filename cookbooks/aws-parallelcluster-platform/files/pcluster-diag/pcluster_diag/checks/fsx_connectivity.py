@@ -36,10 +36,11 @@ executes each probe in isolation and aggregates their findings. The probes are:
   EFA prerequisites the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that
   setup's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+
   instance families, the kefalnd version -- then the state of the ``configure-efa-fsx-lustre-client.service``
-  that (re)configures LNet on every boot, then detects two common root causes: under-bound EFA devices
-  (a device-binding bug where only a subset of the instance's EFA devices are bound to LNet, so Lustre
-  falls back to TCP) and a non-working EFA data path (typically a missing self-referencing security-group
-  rule). See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+  that (re)configures LNet on every boot, then detects two common root causes: no EFA device bound to LNet
+  at all (so Lustre falls back to TCP) and a non-working EFA data path (typically a missing
+  self-referencing security-group rule). A partial bind is not treated as a failure -- several instance
+  families bind only a subset of their EFA devices to LNet by design.
+  See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
 (``approval_required``) deep probe (``lfs check servers`` + per-target import state); the framework's
@@ -167,9 +168,9 @@ class LustreFilesystem(Check):
     NO_EFA_DEVICES = CheckError(
         9, "An EFA LNet net is configured but no EFA devices are exposed under {} -- EFA is not available."
     )
-    UNDERBOUND_DEVICES = CheckError(
+    NO_DEVICES_BOUND = CheckError(
         10,
-        "Only {} of {} EFA devices are bound to LNet -- Lustre will fall back to TCP. "
+        "{} EFA devices are exposed but none are bound to LNet -- Lustre will fall back to TCP. "
         "Re-run the EFA-Lustre client configuration.",
     )
     EFA_PING_FAILED = CheckError(
@@ -212,7 +213,10 @@ class LustreFilesystem(Check):
         "bootstrap script (expected when the EFA-Lustre client package is not used).",
     )
     EFA_SERVICE_ACTIVE = CheckInfo(4, "The EFA-Lustre configuration service {} is installed and not failed.")
-    BOUND_DEVICES = CheckInfo(5, "{} of {} EFA devices are bound to LNet.")
+    BOUND_DEVICES = CheckInfo(
+        5,
+        "{} of {} EFA devices are bound to LNet (some instance families bind a subset by design).",
+    )
     EFA_DRIVER_VERSION = CheckInfo(6, "EFA driver version: {}.")
     KEFALND_VERSION = CheckInfo(7, "kefalnd (EFA LND) version: {}.")
 
@@ -400,8 +404,11 @@ class LustreFilesystem(Check):
         available = efa.efa_device_count()
         if available == 0:
             errors.append(self.NO_EFA_DEVICES.format(EFA_INFINIBAND_SYSFS))
-        elif len(bound) < available:
-            errors.append(self.UNDERBOUND_DEVICES.format(len(bound), available))
+        elif not bound:
+            # No EFA device bound to LNet at all, while devices exist: Lustre cannot ride EFA. A *partial*
+            # bind (0 < bound < available) is not flagged -- several instance families bind only a subset
+            # by design, so "fewer than all" is legitimate and only the count is reported below.
+            errors.append(self.NO_DEVICES_BOUND.format(available))
         else:
             infos.append(self.BOUND_DEVICES.format(len(bound), available))
 

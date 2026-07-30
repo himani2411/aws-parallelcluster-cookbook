@@ -12,13 +12,9 @@
 
 """Lustre helpers: ``lfs``/``lctl`` protocol parsing plus the LNet transport layer.
 
-This module holds the Lustre-side logic: the ``lfs df`` / ``lfs check servers`` / ``lctl ...import``
-protocol parsing, and the LNet transport layer (parsing ``lnetctl net show`` / ``lnetctl peer show`` and
-the ``lnetctl ping`` reachability probe) -- LNet is Lustre's own networking layer, driven by ``lnetctl``.
-EFA *capability* (the ``kefalnd``/EFA driver modules and versions, EFA device count, p6+ family detection)
-lives in :mod:`pcluster_diag.util.efa`; shared-storage enumeration and the ``/proc/mounts`` table live in
-:mod:`pcluster_diag.util.shared_storage`; module-version reading/comparison lives in
-:mod:`pcluster_diag.util.kernel_module`.
+Holds the Lustre-side logic: the ``lfs df`` / ``lfs check servers`` / ``lctl ...import`` protocol parsing,
+and the LNet transport layer (parsing ``lnetctl net show`` / ``lnetctl peer show`` and the ``lnetctl
+ping`` reachability probe) -- LNet is Lustre's own networking layer, driven by ``lnetctl``.
 """
 
 import logging
@@ -286,9 +282,7 @@ def efa_ping_works(source_nid: str, peer_nid: str) -> bool:
 
     A hang or a non-zero exit both mean the EFA data path is not working; only a clean success is True.
     """
-    result = time_command(
-        ["lnetctl", "ping", "--source", source_nid, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS
-    )
+    result = time_command(["lnetctl", "ping", "--source", source_nid, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS)
     return not (result.timed_out or result.returncode != 0)
 
 

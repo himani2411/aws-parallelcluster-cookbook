@@ -13,10 +13,9 @@
 """Kernel-module and kernel probing.
 
 Thin wrappers over ``modinfo``/``lsmod`` (kernel module availability and load state) and ``uname``
-(running kernel release), plus a small dotted-version comparison for module versions. These are used by
-the Lustre/EFA client checks but contain nothing Lustre- or EFA-specific. Every external command is
-routed through :mod:`pcluster_diag.util.shell`; a missing binary is treated as a negative answer, never
-an exception.
+(running kernel release), plus a small dotted-version comparison for module versions. Every external
+command is routed through the shell helper; a missing binary is treated as a negative answer, never an
+exception.
 """
 
 import logging

@@ -10,17 +10,11 @@
 # OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""EFA capability helpers: is EFA present and usable on this instance/client?
+"""EFA capability helpers: is EFA present and usable on this instance?
 
-This is the home for EFA-capability probing, so new EFA checks can build on it. It answers "can this node
-speak EFA at all" -- the ``kefalnd`` module (the EFA LND), the EFA driver and ``kefalnd`` module versions,
-the number of EFA devices the kernel exposes, and whether the running instance is a p6+ family (which
-carries a higher ``kefalnd`` version floor).
-
-The LNet transport layer (parsing ``lnetctl`` output, the ``lnetctl ping`` reachability probe) is Lustre's
-networking layer and lives in :mod:`pcluster_diag.util.lustre`; module-version reading/comparison lives in
-:mod:`pcluster_diag.util.kernel_module`. See
-https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+The home for EFA-capability probing, so new EFA checks can build on it: the ``kefalnd`` module (the EFA
+LND), the EFA driver and ``kefalnd`` module versions, the number of EFA devices the kernel exposes, and
+whether the running instance is a p6+ family (which carries a higher ``kefalnd`` version floor).
 """
 
 import logging

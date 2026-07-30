@@ -359,7 +359,8 @@ net:
               health value: 1000
 """
 
-_LNET_EFA_UNDERBOUND = """\
+# An @efa net with one device bound (efa0). A "partial bind" relative to a multi-device instance.
+_LNET_EFA_PARTIAL_BIND = """\
 net:
     - net type: efa
       local NI(s):
@@ -370,6 +371,20 @@ net:
           statistics:
               send_count: 900
               recv_count: 800
+          health stats:
+              health value: 1000
+"""
+
+# An @efa net present but with no device bound to it (no interfaces): Lustre cannot ride EFA.
+_LNET_EFA_NONE_BOUND = """\
+net:
+    - net type: efa
+      local NI(s):
+        - nid: 10.0.0.1@efa
+          status: up
+          statistics:
+              send_count: 0
+              recv_count: 0
           health stats:
               health value: 1000
 """
@@ -565,7 +580,9 @@ def test_efa_all_bound_and_pinging_no_error(monkeypatch):
     assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
 
 
-def test_efa_underbound_devices_fails(monkeypatch):
+def test_efa_partial_bind_is_not_an_error(monkeypatch):
+    # 1 of 16 devices bound: legitimate on subset-binding families, so it must NOT be an error -- just an
+    # info reporting the count. Only zero-bound is a failure.
     _patch_efa_prereqs(monkeypatch)
     _route_time_command(
         monkeypatch,
@@ -579,11 +596,34 @@ def test_efa_underbound_devices_fails(monkeypatch):
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
-        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_EFA_UNDERBOUND), errors, warnings, infos
+        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_EFA_PARTIAL_BIND), errors, warnings, infos
     )
 
-    assert LustreFilesystem.UNDERBOUND_DEVICES.code in _codes(errors)
-    assert "1 of 16" in _messages(errors)
+    assert LustreFilesystem.NO_DEVICES_BOUND.code not in _codes(errors)
+    assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
+    assert "1 of 16" in _messages(infos)
+
+
+def test_efa_no_devices_bound_fails(monkeypatch):
+    # EFA devices exist but none are bound to LNet: Lustre falls back to TCP -- a real failure on any family.
+    _patch_efa_prereqs(monkeypatch)
+    _route_time_command(
+        monkeypatch,
+        {
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ping ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 16)
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(
+        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_EFA_NONE_BOUND), errors, warnings, infos
+    )
+
+    assert LustreFilesystem.NO_DEVICES_BOUND.code in _codes(errors)
+    assert "16" in _messages(errors)
 
 
 def test_efa_ping_failure_points_at_security_group(monkeypatch):

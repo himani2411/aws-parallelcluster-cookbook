@@ -74,7 +74,7 @@ from pcluster_diag.core.probe import run_probe
 from pcluster_diag.models.check import Check
 from pcluster_diag.models.context import Context
 from pcluster_diag.models.finding import CheckError, CheckInfo, CheckWarning
-from pcluster_diag.models.result import Result
+from pcluster_diag.models.result import INTERNAL_ERROR_CODE, Result
 from pcluster_diag.util import kernel_module, lustre, services, shared_storage
 from pcluster_diag.util.shell import time_command
 
@@ -130,6 +130,29 @@ class LustreFilesystem(Check):
     MODULES_NOT_LOADED = CheckError(2, "Lustre kernel modules are available but not loaded: {}.")
     CLIENT_TOO_OLD = CheckError(
         16, "Lustre client version {} is below the minimum {} the FSx EFA-Lustre setup requires."
+    )
+
+    # --- Errors: undeterminable checks (reserved E0 -> CHECK_ERROR, not FAILURE) ---------------
+    # A version/family the check could not evaluate is reported as a CHECK_ERROR (the check could not
+    # complete its assertion), distinct from a FAILURE (the assertion definitively failed). All carry the
+    # reserved E0 code, which Result.from_findings maps to CHECK_ERROR when no real failure is also present.
+    CLIENT_VERSION_UNDETERMINABLE = CheckError(
+        INTERNAL_ERROR_CODE,
+        "Could not determine the Lustre client version (version string {!r} is unparseable): the "
+        "minimum-version check (>= {}) was not evaluated.",
+    )
+    EFA_DRIVER_VERSION_UNDETERMINABLE = CheckError(
+        INTERNAL_ERROR_CODE,
+        "Could not determine the EFA driver version: the minimum-version check (>= {}) was not evaluated.",
+    )
+    KEFALND_VERSION_UNDETERMINABLE = CheckError(
+        INTERNAL_ERROR_CODE,
+        "Could not determine the kefalnd version: the p6+ minimum-version check (>= {}) was not evaluated.",
+    )
+    INSTANCE_TYPE_UNDETERMINABLE = CheckError(
+        INTERNAL_ERROR_CODE,
+        "Could not determine the instance type (an IMDS error at startup): the p6+ kefalnd "
+        "minimum-version check ({} >= {}) was not evaluated.",
     )
 
     # --- Errors: mount presence ---------------------------------------------------------------
@@ -190,17 +213,6 @@ class LustreFilesystem(Check):
         "EFA LNet interface {} shows no traffic (send_count=0, recv_count=0) -- possible silent TCP fallback.",
     )
     TCP_FALLBACK = CheckWarning(3, "target {} is connected over @tcp despite EFA being configured (TCP fallback).")
-    INSTANCE_TYPE_UNKNOWN = CheckWarning(
-        4,
-        "The instance type could not be determined (an IMDS error at startup): the p6+ kefalnd "
-        "minimum-version check ({} >= {}) was skipped.",
-    )
-    EFA_DRIVER_VERSION_UNKNOWN = CheckWarning(
-        5, "The EFA driver version could not be determined: the minimum-version check (>= {}) was skipped."
-    )
-    KEFALND_VERSION_UNKNOWN = CheckWarning(
-        6, "The kefalnd version could not be determined: the p6+ minimum-version check (>= {}) was skipped."
-    )
 
     # --- Infos --------------------------------------------------------------------------------
     CLIENT_VERSION = CheckInfo(1, "Lustre client version: {}.")
@@ -280,10 +292,15 @@ class LustreFilesystem(Check):
         version = lustre.lustre_client_version()
         if version:
             infos.append(self.CLIENT_VERSION.format(version))
-            # The official setup enforces a client-version floor. version_at_least returns None when the
-            # version string is unparseable: only flag CLIENT_TOO_OLD on a definite below-minimum result,
-            # never on an undeterminable one (that is left to the module-availability check).
-            if lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION) is False:
+            # The FSx EFA-Lustre setup enforces a client-version floor. version_at_least is tri-state:
+            # True (>= floor), False (definitely below -> FAILURE), or None (version present but
+            # unparseable). We do not mask the None case: rather than silently skip it, we report a
+            # CHECK_ERROR (reserved E0) saying the floor could not be evaluated -- distinct from a definite
+            # too-old FAILURE.
+            at_least = lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION)
+            if at_least is None:
+                errors.append(self.CLIENT_VERSION_UNDETERMINABLE.format(version, MIN_LUSTRE_CLIENT_VERSION))
+            elif at_least is False:
                 errors.append(self.CLIENT_TOO_OLD.format(version, MIN_LUSTRE_CLIENT_VERSION))
 
     def _probe_mounts(self, context: Context, errors: List[CheckError]) -> None:
@@ -371,7 +388,7 @@ class LustreFilesystem(Check):
 
         # Prerequisites first (mirrors the official setup's ordering). A missing kefalnd means the client
         # cannot ride EFA at all, so we report that root cause and stop before the data-path probes.
-        if not self._probe_efa_prerequisites(context, errors, warnings, infos):
+        if not self._probe_efa_prerequisites(context, errors, infos):
             return
 
         # The systemd service is how this delivery vehicle persists the EFA/LNet config across reboots.
@@ -390,57 +407,44 @@ class LustreFilesystem(Check):
         errors.extend(self._efa_ping_errors(lnet.nets))
         warnings.extend(self._tcp_fallback_warnings(lnet.nets))
 
-    def _probe_efa_prerequisites(
-        self,
-        context: Context,
-        errors: List[CheckError],
-        warnings: List[CheckWarning],
-        infos: List[CheckInfo],
-    ) -> bool:
+    def _probe_efa_prerequisites(self, context: Context, errors: List[CheckError], infos: List[CheckInfo]) -> bool:
         """Verify the EFA-for-Lustre client prerequisites; return whether kefalnd is present.
 
         A False return (kefalnd missing) means the client fundamentally cannot ride EFA, so the caller
         skips the data-path probes. The EFA driver and (on the p6+ families) kefalnd version floors are
-        reported here too. A version that cannot be determined -- an unparseable module version, or (for the
-        p6+ gate) an instance type IMDS could not report -- is surfaced as a warning noting the check was
-        skipped, never as a false too-old error.
+        reported here too. A version/family that cannot be determined -- an unparseable module version, or
+        (for the p6+ gate) an instance type IMDS could not report -- is not masked: it is surfaced as a
+        CHECK_ERROR (reserved E0) noting the check could not be evaluated, distinct from a definite too-old
+        FAILURE.
         """
         if not lustre.efa_lnd_supported():
             errors.append(self.KEFALND_MISSING)
             return False
 
-        self._check_efa_driver_version(errors, warnings, infos)
-        self._check_kefalnd_version(context, errors, warnings, infos)
+        self._check_efa_driver_version(errors, infos)
+        self._check_kefalnd_version(context, errors, infos)
         return True
 
-    def _check_efa_driver_version(
-        self, errors: List[CheckError], warnings: List[CheckWarning], infos: List[CheckInfo]
-    ) -> None:
-        """Report the EFA driver version and flag it only when it is definitely below the minimum."""
+    def _check_efa_driver_version(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
+        """Report the EFA driver version; flag definitely-too-old as FAILURE and undeterminable as E0."""
         driver_version = lustre.efa_driver_version()
         if not driver_version:
-            warnings.append(self.EFA_DRIVER_VERSION_UNKNOWN.format(MIN_EFA_DRIVER_VERSION))
+            errors.append(self.EFA_DRIVER_VERSION_UNDETERMINABLE.format(MIN_EFA_DRIVER_VERSION))
             return
         infos.append(self.EFA_DRIVER_VERSION.format(driver_version))
         at_least = lustre.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION)
         if at_least is None:
-            # Present but unparseable -- surface that the floor check was skipped, do not assume too-old.
-            warnings.append(self.EFA_DRIVER_VERSION_UNKNOWN.format(MIN_EFA_DRIVER_VERSION))
+            # Present but unparseable -- the floor could not be evaluated; report it, do not assume too-old.
+            errors.append(self.EFA_DRIVER_VERSION_UNDETERMINABLE.format(MIN_EFA_DRIVER_VERSION))
         elif at_least is False:
             errors.append(self.EFA_DRIVER_TOO_OLD.format(driver_version, MIN_EFA_DRIVER_VERSION))
 
-    def _check_kefalnd_version(
-        self,
-        context: Context,
-        errors: List[CheckError],
-        warnings: List[CheckWarning],
-        infos: List[CheckInfo],
-    ) -> None:
+    def _check_kefalnd_version(self, context: Context, errors: List[CheckError], infos: List[CheckInfo]) -> None:
         """Report the kefalnd version and, on the p6+ families only, flag it when definitely below the floor.
 
         The p6+ gate needs the instance type. When it is unknown (IMDS could not report it at startup),
         is_p6plus_instance returns None: we cannot tell whether the p6+ floor applies, so we surface a
-        warning that the check was skipped rather than silently passing.
+        CHECK_ERROR (reserved E0) that the check could not be evaluated rather than silently passing.
         """
         kefalnd_version = lustre.efa_lnd_version()
         if kefalnd_version:
@@ -448,7 +452,7 @@ class LustreFilesystem(Check):
 
         p6plus = lustre.is_p6plus_instance(context.instance_type)
         if p6plus is None:
-            warnings.append(self.INSTANCE_TYPE_UNKNOWN.format(EFA_LND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
+            errors.append(self.INSTANCE_TYPE_UNDETERMINABLE.format(EFA_LND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
             return
         if not p6plus:
             # Known non-p6 family: the kefalnd version floor does not apply.
@@ -456,11 +460,11 @@ class LustreFilesystem(Check):
 
         # p6+ family: the floor applies.
         if not kefalnd_version:
-            warnings.append(self.KEFALND_VERSION_UNKNOWN.format(MIN_KEFALND_VERSION_P6))
+            errors.append(self.KEFALND_VERSION_UNDETERMINABLE.format(MIN_KEFALND_VERSION_P6))
             return
         at_least = lustre.version_at_least(kefalnd_version, MIN_KEFALND_VERSION_P6)
         if at_least is None:
-            warnings.append(self.KEFALND_VERSION_UNKNOWN.format(MIN_KEFALND_VERSION_P6))
+            errors.append(self.KEFALND_VERSION_UNDETERMINABLE.format(MIN_KEFALND_VERSION_P6))
         elif at_least is False:
             errors.append(self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type))
 

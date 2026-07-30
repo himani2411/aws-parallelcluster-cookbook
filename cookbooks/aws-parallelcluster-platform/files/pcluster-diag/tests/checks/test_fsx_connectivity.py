@@ -165,14 +165,18 @@ def test_client_too_old_version_fails(monkeypatch):
     assert LustreFilesystem.CLIENT_TOO_OLD.code in _codes(errors)
 
 
-def test_client_unparseable_version_does_not_flag_too_old(monkeypatch):
-    # An unparseable (but present) version must not be reported as too-old; it is left to the module check.
+def test_client_unparseable_version_reports_undeterminable_not_too_old(monkeypatch):
+    # An unparseable (but present) version is not masked and not reported as too-old: it is surfaced as a
+    # CHECK_ERROR (reserved E0) saying the floor could not be evaluated.
     _patch_client(monkeypatch, version="unknown")
     errors, infos = [], []
 
     LustreFilesystem()._probe_client(errors, infos)
 
+    assert LustreFilesystem.CLIENT_VERSION_UNDETERMINABLE.code in _codes(errors)
     assert LustreFilesystem.CLIENT_TOO_OLD.code not in _codes(errors)
+    # The undeterminable finding carries the reserved E0 code -> CHECK_ERROR, not a real FAILURE.
+    assert LustreFilesystem.CLIENT_VERSION_UNDETERMINABLE.code == "E0"
 
 
 # --- mount-presence probe -------------------------------------------------------------
@@ -680,9 +684,9 @@ def test_efa_kefalnd_too_old_only_on_p6(monkeypatch):
     assert LustreFilesystem.KEFALND_TOO_OLD.code not in _codes(errors)
 
 
-def test_efa_unknown_instance_type_warns_and_skips_kefalnd_floor(monkeypatch):
+def test_efa_unknown_instance_type_reports_undeterminable_not_too_old(monkeypatch):
     # Instance type unknown (IMDS failed at startup): the p6+ kefalnd floor cannot be evaluated. The probe
-    # must warn that the check was skipped rather than flag a too-old error or silently pass.
+    # must surface a CHECK_ERROR (reserved E0) rather than flag a too-old error or silently pass.
     _patch_efa_prereqs(monkeypatch, kefalnd_version="1.0.0")
     _route_time_command(
         monkeypatch,
@@ -696,12 +700,13 @@ def test_efa_unknown_instance_type_warns_and_skips_kefalnd_floor(monkeypatch):
 
     LustreFilesystem()._probe_efa(unknown, _snapshot(_LNET_TCP_EFA), errors, warnings, infos)
 
-    assert LustreFilesystem.INSTANCE_TYPE_UNKNOWN.code in _codes(warnings)
+    assert LustreFilesystem.INSTANCE_TYPE_UNDETERMINABLE.code in _codes(errors)
+    assert LustreFilesystem.INSTANCE_TYPE_UNDETERMINABLE.code == "E0"
     assert LustreFilesystem.KEFALND_TOO_OLD.code not in _codes(errors)
 
 
-def test_efa_driver_version_unparseable_warns_not_errors(monkeypatch):
-    # A present-but-unparseable EFA driver version is surfaced as a skipped check, not a too-old error.
+def test_efa_driver_version_unparseable_reports_undeterminable_not_too_old(monkeypatch):
+    # A present-but-unparseable EFA driver version is surfaced as a CHECK_ERROR (E0), not a too-old error.
     _patch_efa_prereqs(monkeypatch, efa_driver_version="unknown")
     _route_time_command(
         monkeypatch,
@@ -714,7 +719,7 @@ def test_efa_driver_version_unparseable_warns_not_errors(monkeypatch):
         sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_TCP_EFA), errors, warnings, infos
     )
 
-    assert LustreFilesystem.EFA_DRIVER_VERSION_UNKNOWN.code in _codes(warnings)
+    assert LustreFilesystem.EFA_DRIVER_VERSION_UNDETERMINABLE.code in _codes(errors)
     assert LustreFilesystem.EFA_DRIVER_TOO_OLD.code not in _codes(errors)
 
 
@@ -772,6 +777,33 @@ def test_run_passes_when_all_probes_clean(monkeypatch):
     result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
 
     assert result.status is Status.PASSED
+
+
+def test_run_is_check_error_not_failure_when_only_undeterminable(monkeypatch):
+    # Everything healthy except the instance type is unknown (IMDS error). The undeterminable finding is an
+    # E0 error, so the aggregate status is CHECK_ERROR (the check could not fully evaluate), NOT FAILURE
+    # (no real assertion failed) -- error and failure are distinct sections.
+    _patch_client(monkeypatch)
+    _patch_efa_prereqs(monkeypatch, kefalnd_version="1.0.0")
+    monkeypatch.setattr(fsx_connectivity.shared_storage, "read_mounts", _mounts_from(_PROC_MOUNTS_BOTH))
+    _route_time_command(
+        monkeypatch,
+        {
+            "net show": _timed(stdout=_LNET_TCP_EFA),
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+            "df": _timed(stdout=_HEALTHY_LFS_DF),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+
+    unknown = sample_context_with_lustre(NodeType.COMPUTE)
+    unknown.instance_type = None  # IMDS could not report the instance type
+    result = LustreFilesystem().run(unknown)
+
+    assert result.status is Status.CHECK_ERROR
+    assert LustreFilesystem.INSTANCE_TYPE_UNDETERMINABLE.code in _codes(result.errors)
 
 
 def test_run_fails_when_any_probe_reports_an_error(monkeypatch):

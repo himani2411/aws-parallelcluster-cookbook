@@ -502,8 +502,9 @@ def test_lnet_health_decay_is_warning(monkeypatch):
 # --- EFA-mount probe ------------------------------------------------------------------
 
 
-def test_efa_probe_noop_without_efa_net(monkeypatch):
-    # No @efa net configured on this node: EFA is not expected here, so the probe records nothing.
+def test_efa_probe_noop_without_efa_net_or_service(monkeypatch):
+    # Neither an @efa net nor the EFA-Lustre service on this node: EFA is not expected, so record nothing.
+    monkeypatch.setattr(fsx_connectivity.services, "systemd_unit_exists", lambda unit: False)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -511,6 +512,25 @@ def test_efa_probe_noop_without_efa_net(monkeypatch):
     )
 
     assert errors == [] and warnings == [] and infos == []
+
+
+def test_efa_missing_kefalnd_caught_when_service_installed_but_no_efa_net(monkeypatch):
+    # The regression this guards: kefalnd failed to load -> no @efa net is ever added. Gating on the @efa
+    # net alone would skip the node. The installed systemd service is the node-local "EFA expected" signal
+    # that survives the kefalnd failure, so KEFALND_MISSING is still reported despite there being no @efa net.
+    _patch_efa_prereqs(monkeypatch, kefalnd_available=False, service_exists=True)
+
+    def _boom_device_count():
+        raise AssertionError("data-path probe must not run when kefalnd is missing")
+
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", _boom_device_count)
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(
+        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_TCP_ONLY), errors, warnings, infos
+    )
+
+    assert _codes(errors) == [LustreFilesystem.KEFALND_MISSING.code]
 
 
 def test_efa_probe_noop_when_lnet_timed_out():
@@ -734,6 +754,24 @@ def test_efa_service_failed_is_error(monkeypatch):
 
     LustreFilesystem()._probe_efa(
         sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_TCP_EFA), errors, warnings, infos
+    )
+
+    assert LustreFilesystem.EFA_SERVICE_FAILED.code in _codes(errors)
+
+
+def test_efa_service_failed_without_efa_net_reports_service_and_skips_data_path(monkeypatch):
+    # The config service is installed but failed, so no @efa net came up. The service failure is reported
+    # and the data-path probes are skipped (there is no live net to inspect).
+    _patch_efa_prereqs(monkeypatch, service_exists=True, service_failed=True)
+
+    def _boom_device_count():
+        raise AssertionError("data-path probe must not run when there is no @efa net")
+
+    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", _boom_device_count)
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(
+        sample_context_with_lustre(NodeType.COMPUTE), _snapshot(_LNET_TCP_ONLY), errors, warnings, infos
     )
 
     assert LustreFilesystem.EFA_SERVICE_FAILED.code in _codes(errors)

@@ -362,37 +362,50 @@ class LustreFilesystem(Check):
     ) -> None:
         """Detect the EFA-for-Lustre root causes, after verifying the EFA prerequisites are in place.
 
-        Acts only when EFA-for-Lustre is *expected* on this node, i.e. an ``@efa`` LNet net is configured.
+        Acts only when EFA-for-Lustre is *expected* on this node. "Expected" is signalled by EITHER an
+        ``@efa`` LNet net being configured OR the ``configure-efa-fsx-lustre-client`` systemd service being
+        installed on this node. The service is essential to the gate: if ``kefalnd`` failed to load, no
+        ``@efa`` net is ever added, so gating on the ``@efa`` net alone would skip the very node the
+        ``kefalnd`` check exists to catch -- the service (installed by the setup script, independent of
+        whether kefalnd loaded) is the node-local "EFA was set up here" signal that survives that failure.
         We deliberately do not infer "expected" from the cluster config's OnNodeStart custom actions: the
-        config carries the actions for every node type (HeadNode, each queue, each login pool), and mapping
-        those back to *this* node is unreliable, so the on-node ``@efa`` net is the ground truth. On a
-        non-EFA node this is a no-op.
+        config carries the actions for every node type, and mapping those back to *this* node is unreliable.
 
         When expected, it first verifies the prerequisites the official FSx EFA-Lustre client setup
         enforces before configuring EFA -- the ``kefalnd`` module (that setup's own definition of "the
-        client supports EFA"), the EFA driver version, and on the p6+ families the kefalnd version -- and
-        the systemd service that persists the LNet config across reboots. A missing ``kefalnd``
-        short-circuits the data-path probes: without it there can be no working ``@efa`` net, so the
-        follow-on probes would add nothing. Then it automates the FSx tutorial's "Validate FSx with EFA is
-        working" commands (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and the client-side
-        import state, to name -- not fix -- the failures. Read-only: never re-binds devices or edits the
-        security group.
+        client supports EFA"), the EFA driver version, and on the p6+ families the kefalnd version. A
+        missing ``kefalnd`` is reported (``KEFALND_MISSING``) and short-circuits the rest: without it there
+        can be no working ``@efa`` net, so the follow-on probes would add nothing. Then it reports the
+        systemd service state and, when a live ``@efa`` net exists, automates the FSx tutorial's "Validate
+        FSx with EFA is working" commands (``lnetctl net show --net efa -v``, ``lnetctl ping ...@efa``) and
+        the client-side import state, to name -- not fix -- the failures. Read-only: never re-binds devices
+        or edits the security group.
         """
         if lnet.timed_out:
             # The LNet probe already reported the hang; there is nothing to inspect here.
             return
         efa_net = lustre.lnet_net(lnet.nets, EFA_LNET_NET)
-        if efa_net is None:
-            # No @efa net configured on this node: EFA-for-Lustre is not expected here; nothing to check.
+        # Query the service once (like the shared lnet snapshot) and reuse it for both the gate and the
+        # service-state report. This is the signal that survives a kefalnd load failure (which leaves no
+        # @efa net), so it -- not the @efa net alone -- decides whether EFA is expected on this node.
+        service_installed = services.systemd_unit_exists(EFA_LUSTRE_SYSTEMD_SERVICE)
+        if efa_net is None and not service_installed:
+            # Neither an @efa net nor the EFA-Lustre service on this node: EFA is not expected; nothing to check.
             return
 
-        # Prerequisites first (mirrors the official setup's ordering). A missing kefalnd means the client
-        # cannot ride EFA at all, so we report that root cause and stop before the data-path probes.
+        # Prerequisites first (mirrors the official setup's ordering), BEFORE bailing on a missing @efa net:
+        # a missing kefalnd is exactly why the @efa net would be absent, and it is the root cause to report.
         if not self._probe_efa_prerequisites(context, errors, infos):
             return
 
         # The systemd service is how this delivery vehicle persists the EFA/LNet config across reboots.
-        self._probe_efa_service(errors, infos)
+        self._probe_efa_service(service_installed, errors, infos)
+
+        if efa_net is None:
+            # The service is installed but no @efa net came up (e.g. the config service failed): the
+            # prerequisite/service findings above localize why. There is no live net to probe for
+            # devices/traffic, so stop here.
+            return
 
         bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
         available = _efa_device_count()
@@ -468,17 +481,18 @@ class LustreFilesystem(Check):
         elif at_least is False:
             errors.append(self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type))
 
-    def _probe_efa_service(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
+    def _probe_efa_service(self, service_installed: bool, errors: List[CheckError], infos: List[CheckInfo]) -> None:
         """Report the state of the EFA-Lustre systemd service that persists the LNet config across reboots.
 
-        Failed -> error (LNet was not configured for EFA); installed and not failed -> info; not installed
-        -> info (LNet is configured at runtime by the bootstrap script rather than this service). This
-        replaces the old ``/etc/lnet.conf`` probe: the FSx EFA-Lustre client delivery vehicle does not use
-        ``lnet.conf`` -- it persists via ``configure-efa-fsx-lustre-client.service`` (re-run each boot) and
-        ``/etc/modprobe.d/modprobe.conf``.
+        ``service_installed`` is passed in (already queried by the caller for the EFA-expected gate) to
+        avoid a second ``systemctl`` call. Failed -> error (LNet was not configured for EFA); installed and
+        not failed -> info; not installed -> info (LNet is configured at runtime by the bootstrap script
+        rather than this service). This replaces the old ``/etc/lnet.conf`` probe: the FSx EFA-Lustre client
+        delivery vehicle does not use ``lnet.conf`` -- it persists via
+        ``configure-efa-fsx-lustre-client.service`` (re-run each boot) and ``/etc/modprobe.d/modprobe.conf``.
         """
         service = EFA_LUSTRE_SYSTEMD_SERVICE
-        if not services.systemd_unit_exists(service):
+        if not service_installed:
             infos.append(self.EFA_SERVICE_ABSENT.format(service))
         elif services.systemd_unit_failed(service):
             errors.append(self.EFA_SERVICE_FAILED.format(service, service))

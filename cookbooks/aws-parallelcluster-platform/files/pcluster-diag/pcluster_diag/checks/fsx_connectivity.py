@@ -31,14 +31,14 @@ executes each probe in isolation and aggregates their findings. The probes are:
   classifying a hang, an error, or a down target;
 - **LNet transport** -- ``lnetctl net show`` reporting the active LNDs (tcp/efa/o2ib), surfacing the
   EFA-vs-TCP transport state at the heart of the connectivity tickets;
-- **EFA mount** -- run whenever EFA-for-Lustre is *expected* (an ``@efa`` LNet net is configured, or an
-  OnNodeStart custom action wires the EFA-Lustre config script). It first verifies the EFA prerequisites
-  the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that setup's own
-  definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+ instance
-  families, the kefalnd version -- then the systemd service that persists the LNet config across reboots
-  (``configure-efa-fsx-lustre-client.service``; this delivery vehicle does not use ``/etc/lnet.conf``),
-  then detects the two root causes from the tickets: under-bound EFA devices (the family-specific
-  device-binding bug) and a non-working EFA data path (the missing self-referencing security-group rule).
+- **EFA mount** -- run whenever EFA-for-Lustre is *expected* (an ``@efa`` LNet net is configured, or the
+  ``configure-efa-fsx-lustre-client`` systemd service is installed on this node). It first verifies the
+  EFA prerequisites the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that
+  setup's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+
+  instance families, the kefalnd version -- then the state of the ``configure-efa-fsx-lustre-client.service``
+  that (re)configures LNet on every boot, then detects the two root causes from the tickets: under-bound
+  EFA devices (the family-specific device-binding bug) and a non-working EFA data path (the missing
+  self-referencing security-group rule).
   See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
@@ -57,7 +57,7 @@ from typing import List
 
 from pcluster_diag.core.constants import (
     EFA_INFINIBAND_SYSFS,
-    EFA_LND_KERNEL_MODULE,
+    EFA_KEFALND_KERNEL_MODULE,
     EFA_LNET_NET,
     EFA_LUSTRE_SYSTEMD_SERVICE,
     FSX_EFA_PING_TIMEOUT_SECONDS,
@@ -430,7 +430,7 @@ class LustreFilesystem(Check):
         CHECK_ERROR (reserved E0) noting the check could not be evaluated, distinct from a definite too-old
         FAILURE.
         """
-        if not lustre.efa_lnd_supported():
+        if not lustre.efa_kefalnd_supported():
             errors.append(self.KEFALND_MISSING)
             return False
 
@@ -459,13 +459,13 @@ class LustreFilesystem(Check):
         is_p6plus_instance returns None: we cannot tell whether the p6+ floor applies, so we surface a
         CHECK_ERROR (reserved E0) that the check could not be evaluated rather than silently passing.
         """
-        kefalnd_version = lustre.efa_lnd_version()
+        kefalnd_version = lustre.efa_kefalnd_version()
         if kefalnd_version:
             infos.append(self.KEFALND_VERSION.format(kefalnd_version))
 
         p6plus = lustre.is_p6plus_instance(context.instance_type)
         if p6plus is None:
-            errors.append(self.INSTANCE_TYPE_UNDETERMINABLE.format(EFA_LND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
+            errors.append(self.INSTANCE_TYPE_UNDETERMINABLE.format(EFA_KEFALND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
             return
         if not p6plus:
             # Known non-p6 family: the kefalnd version floor does not apply.
@@ -482,22 +482,20 @@ class LustreFilesystem(Check):
             errors.append(self.KEFALND_TOO_OLD.format(kefalnd_version, MIN_KEFALND_VERSION_P6, context.instance_type))
 
     def _probe_efa_service(self, service_installed: bool, errors: List[CheckError], infos: List[CheckInfo]) -> None:
-        """Report the state of the EFA-Lustre systemd service that persists the LNet config across reboots.
+        """Report the state of the ``configure-efa-fsx-lustre-client`` service that (re)configures LNet on boot.
 
         ``service_installed`` is passed in (already queried by the caller for the EFA-expected gate) to
         avoid a second ``systemctl`` call. Failed -> error (LNet was not configured for EFA); installed and
         not failed -> info; not installed -> info (LNet is configured at runtime by the bootstrap script
-        rather than this service). This replaces the old ``/etc/lnet.conf`` probe: the FSx EFA-Lustre client
-        delivery vehicle does not use ``lnet.conf`` -- it persists via
-        ``configure-efa-fsx-lustre-client.service`` (re-run each boot) and ``/etc/modprobe.d/modprobe.conf``.
+        rather than this service).
         """
-        service = EFA_LUSTRE_SYSTEMD_SERVICE
+        efa_service = EFA_LUSTRE_SYSTEMD_SERVICE
         if not service_installed:
-            infos.append(self.EFA_SERVICE_ABSENT.format(service))
-        elif services.systemd_unit_failed(service):
-            errors.append(self.EFA_SERVICE_FAILED.format(service, service))
+            infos.append(self.EFA_SERVICE_ABSENT.format(efa_service))
+        elif services.systemd_unit_failed(efa_service):
+            errors.append(self.EFA_SERVICE_FAILED.format(efa_service, efa_service))
         else:
-            infos.append(self.EFA_SERVICE_ACTIVE.format(service))
+            infos.append(self.EFA_SERVICE_ACTIVE.format(efa_service))
 
     def _health_warnings(self, nets) -> List[CheckWarning]:
         """Return a warning per NI whose health value has decayed below the healthy maximum (1000)."""

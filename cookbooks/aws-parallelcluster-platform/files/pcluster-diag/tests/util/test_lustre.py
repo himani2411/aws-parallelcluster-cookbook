@@ -304,8 +304,8 @@ def test_is_p6plus_instance(instance_type, expected):
     assert lustre.is_p6plus_instance(instance_type) is expected
 
 
-def test_efa_lnd_supported_delegates_to_modinfo(monkeypatch):
+def test_efa_kefalnd_supported_delegates_to_modinfo(monkeypatch):
     monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: module == "kefalnd")
-    assert lustre.efa_lnd_supported() is True
+    assert lustre.efa_kefalnd_supported() is True
     monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: False)
-    assert lustre.efa_lnd_supported() is False
+    assert lustre.efa_kefalnd_supported() is False

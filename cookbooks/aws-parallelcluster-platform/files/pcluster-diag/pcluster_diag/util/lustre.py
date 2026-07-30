@@ -26,7 +26,7 @@ import yaml
 
 from pcluster_diag.core.constants import (
     EFA_DRIVER_KERNEL_MODULE,
-    EFA_LND_KERNEL_MODULE,
+    EFA_KEFALND_KERNEL_MODULE,
     P6PLUS_INSTANCE_PREFIXES,
 )
 from pcluster_diag.util import kernel_module
@@ -116,7 +116,7 @@ def lustre_client_version() -> Optional[str]:
 # --- EFA-for-Lustre client prerequisites ----------------------------------------------
 
 
-def efa_lnd_supported() -> bool:
+def efa_kefalnd_supported() -> bool:
     """Return whether the Lustre client supports EFA, i.e. the ``kefalnd`` module is available.
 
     This mirrors the official FSx EFA-Lustre client setup's definition of EFA support (it verifies that
@@ -124,7 +124,7 @@ def efa_lnd_supported() -> bool:
     LNet is configured. See
     https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
     """
-    return kernel_module.kernel_module_available(EFA_LND_KERNEL_MODULE)
+    return kernel_module.kernel_module_available(EFA_KEFALND_KERNEL_MODULE)
 
 
 def efa_driver_version() -> Optional[str]:
@@ -132,9 +132,9 @@ def efa_driver_version() -> Optional[str]:
     return kernel_module.module_version(EFA_DRIVER_KERNEL_MODULE)
 
 
-def efa_lnd_version() -> Optional[str]:
-    """Return the EFA LND (``kefalnd``) kernel module version, or None when unavailable."""
-    return kernel_module.module_version(EFA_LND_KERNEL_MODULE)
+def efa_kefalnd_version() -> Optional[str]:
+    """Return the ``kefalnd`` (EFA LND) kernel module version, or None when unavailable."""
+    return kernel_module.module_version(EFA_KEFALND_KERNEL_MODULE)
 
 
 def is_p6plus_instance(instance_type: Optional[str]) -> Optional[bool]:

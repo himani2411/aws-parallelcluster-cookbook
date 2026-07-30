@@ -86,9 +86,9 @@ def _patch_efa_prereqs(
     present, the versions meet the floors, and the systemd service is absent (the common PC compute-node
     case). Individual tests override a single kwarg to exercise a prerequisite/service failure.
     """
-    monkeypatch.setattr(fsx_connectivity.lustre, "efa_lnd_supported", lambda: kefalnd_available)
+    monkeypatch.setattr(fsx_connectivity.lustre, "efa_kefalnd_supported", lambda: kefalnd_available)
     monkeypatch.setattr(fsx_connectivity.lustre, "efa_driver_version", lambda: efa_driver_version)
-    monkeypatch.setattr(fsx_connectivity.lustre, "efa_lnd_version", lambda: kefalnd_version)
+    monkeypatch.setattr(fsx_connectivity.lustre, "efa_kefalnd_version", lambda: kefalnd_version)
     monkeypatch.setattr(fsx_connectivity.services, "systemd_unit_exists", lambda unit: service_exists)
     monkeypatch.setattr(fsx_connectivity.services, "systemd_unit_failed", lambda unit: service_failed)
 

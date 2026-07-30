@@ -127,11 +127,11 @@ EFA_LNET_NET = "efa"
 EFA_INFINIBAND_SYSFS = "/sys/class/infiniband"
 # The EFA driver kernel module (its version gates the EFA-Lustre path).
 EFA_DRIVER_KERNEL_MODULE = "efa"
-# The EFA LND kernel module. Its presence is how the official FSx EFA-Lustre client setup defines "this
-# Lustre client supports EFA" (it verifies that ``modinfo kefalnd`` succeeds), so it is a prerequisite for
-# any EFA-for-Lustre probing, checked before the data-path probes run. See
+# The kefalnd kernel module (the EFA LND). Its presence is how the official FSx EFA-Lustre client setup
+# defines "this Lustre client supports EFA" (it verifies that ``modinfo kefalnd`` succeeds), so it is a
+# prerequisite for any EFA-for-Lustre probing, checked before the data-path probes run. See
 # https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
-EFA_LND_KERNEL_MODULE = "kefalnd"
+EFA_KEFALND_KERNEL_MODULE = "kefalnd"
 # Minimum versions the official FSx EFA-Lustre client setup enforces before configuring EFA. See
 # https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 MIN_EFA_DRIVER_VERSION = "2.12.1"
@@ -140,5 +140,5 @@ MIN_LUSTRE_CLIENT_VERSION = "2.15"
 # Instance-family prefixes that require the kefalnd version check (the p6+ families).
 P6PLUS_INSTANCE_PREFIXES = ("p6-b200", "p6e-gb200", "p6-b300")
 # The systemd oneshot service the FSx EFA-Lustre client setup installs to (re)configure LNet on every
-# boot. Its state -- not /etc/lnet.conf -- is the real persistence/health signal for this delivery vehicle.
+# boot. Its state is the persistence/health signal for this delivery vehicle.
 EFA_LUSTRE_SYSTEMD_SERVICE = "configure-efa-fsx-lustre-client.service"

@@ -86,9 +86,9 @@ def _patch_efa_prereqs(
     present, the versions meet the floors, and the systemd service is absent (the common PC compute-node
     case). Individual tests override a single kwarg to exercise a prerequisite/service failure.
     """
-    monkeypatch.setattr(fsx_connectivity.lustre, "efa_kefalnd_supported", lambda: kefalnd_available)
-    monkeypatch.setattr(fsx_connectivity.lustre, "efa_driver_version", lambda: efa_driver_version)
-    monkeypatch.setattr(fsx_connectivity.lustre, "efa_kefalnd_version", lambda: kefalnd_version)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_kefalnd_supported", lambda: kefalnd_available)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_driver_version", lambda: efa_driver_version)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_kefalnd_version", lambda: kefalnd_version)
     monkeypatch.setattr(fsx_connectivity.services, "systemd_unit_exists", lambda unit: service_exists)
     monkeypatch.setattr(fsx_connectivity.services, "systemd_unit_failed", lambda unit: service_failed)
 
@@ -440,11 +440,14 @@ _LFS_CHECK_BAD = "fs-OST0000-osc-ffff active.\ncheck 'fs-OST000b-osc-ffff': Inpu
 
 
 def _route_time_command(monkeypatch, routes, default=None):
-    """Patch fsx_connectivity.time_command to dispatch by a substring match on the joined command.
+    """Patch time_command in every module that runs one, dispatching by substring match on the command.
 
     ``routes`` maps a substring (e.g. "net show", "peer show", "lfs check") to the TimedCommand to
     return. The first matching route wins; ``default`` (or a zero-exit empty result) is used otherwise.
+    The check runs ``lfs``/``lctl`` commands via ``fsx_connectivity.time_command`` and the LNet peer/ping
+    commands via ``lustre.time_command``, so both are patched with the same router.
     """
+    from pcluster_diag.util import lustre
 
     def fake_time_command(command, timeout):
         joined = " ".join(command)
@@ -454,13 +457,13 @@ def _route_time_command(monkeypatch, routes, default=None):
         return default if default is not None else _timed()
 
     monkeypatch.setattr(fsx_connectivity, "time_command", fake_time_command)
+    monkeypatch.setattr(lustre, "time_command", fake_time_command)
 
 
 # --- LNet-transport probe -------------------------------------------------------------
 
 
 def test_lnet_reports_active_lnds_no_error(monkeypatch):
-    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_lnet(_snapshot(_LNET_TCP_EFA), errors, warnings, infos)
@@ -473,7 +476,6 @@ def test_lnet_reports_active_lnds_no_error(monkeypatch):
 
 
 def test_lnet_no_nets_fails(monkeypatch):
-    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_lnet(_snapshot("net:\n"), errors, warnings, infos)
@@ -491,7 +493,6 @@ def test_lnet_timeout_fails_with_timeout_code():
 
 def test_lnet_health_decay_is_warning(monkeypatch):
     decayed = _LNET_EFA_NO_TRAFFIC.replace("health value: 1000", "health value: 500", 1)
-    monkeypatch.setattr(fsx_connectivity.os.path, "exists", lambda path: False)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_lnet(_snapshot(decayed), errors, warnings, infos)
@@ -523,7 +524,7 @@ def test_efa_missing_kefalnd_caught_when_service_installed_but_no_efa_net(monkey
     def _boom_device_count():
         raise AssertionError("data-path probe must not run when kefalnd is missing")
 
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", _boom_device_count)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", _boom_device_count)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -553,7 +554,7 @@ def test_efa_all_bound_and_pinging_no_error(monkeypatch):
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -574,7 +575,7 @@ def test_efa_underbound_devices_fails(monkeypatch):
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 16)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 16)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -595,7 +596,7 @@ def test_efa_ping_failure_points_at_security_group(monkeypatch):
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -616,7 +617,7 @@ def test_efa_no_traffic_is_warning(monkeypatch):
             "import": _timed(stdout=_IMPORT_EFA),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 2)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 2)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -636,7 +637,7 @@ def test_efa_tcp_fallback_is_warning(monkeypatch):
             "import": _timed(stdout=_IMPORT_TCP_FALLBACK),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -656,7 +657,7 @@ def test_efa_missing_kefalnd_fails_and_skips_data_path(monkeypatch):
     def _boom_device_count():
         raise AssertionError("data-path probe must not run when kefalnd is missing")
 
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", _boom_device_count)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", _boom_device_count)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -672,7 +673,7 @@ def test_efa_driver_too_old_fails(monkeypatch):
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -689,7 +690,7 @@ def test_efa_kefalnd_too_old_only_on_p6(monkeypatch):
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
 
     p6 = sample_context_with_lustre(NodeType.COMPUTE)
     p6.instance_type = _FAKE_P6PLUS_INSTANCE_TYPE
@@ -712,7 +713,7 @@ def test_efa_unknown_instance_type_reports_undeterminable_not_too_old(monkeypatc
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
 
     unknown = sample_context_with_lustre(NodeType.COMPUTE)
     unknown.instance_type = None
@@ -732,7 +733,7 @@ def test_efa_driver_version_unparseable_reports_undeterminable_not_too_old(monke
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -749,7 +750,7 @@ def test_efa_service_failed_is_error(monkeypatch):
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -767,7 +768,7 @@ def test_efa_service_failed_without_efa_net_reports_service_and_skips_data_path(
     def _boom_device_count():
         raise AssertionError("data-path probe must not run when there is no @efa net")
 
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", _boom_device_count)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", _boom_device_count)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -783,7 +784,7 @@ def test_efa_service_present_and_healthy_is_info(monkeypatch):
         monkeypatch,
         {"peer show": _timed(stdout=_LNET_PEER_EFA), "ping": _timed(stdout="ok"), "import": _timed(stdout=_IMPORT_EFA)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
     errors, warnings, infos = [], [], []
 
     LustreFilesystem()._probe_efa(
@@ -810,7 +811,7 @@ def test_run_passes_when_all_probes_clean(monkeypatch):
             "df": _timed(stdout=_HEALTHY_LFS_DF),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
 
     result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
 
@@ -834,7 +835,7 @@ def test_run_is_check_error_not_failure_when_only_undeterminable(monkeypatch):
             "df": _timed(stdout=_HEALTHY_LFS_DF),
         },
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
 
     unknown = sample_context_with_lustre(NodeType.COMPUTE)
     unknown.instance_type = None  # IMDS could not report the instance type
@@ -871,7 +872,7 @@ def test_run_isolates_unexpected_probe_crash_and_keeps_sibling_findings(monkeypa
         monkeypatch,
         {"net show": _timed(stdout=_LNET_TCP_EFA), "df": _timed(stdout=_HEALTHY_LFS_DF)},
     )
-    monkeypatch.setattr(fsx_connectivity, "_efa_device_count", lambda: 1)
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 1)
 
     result = LustreFilesystem().run(sample_context_with_lustre(NodeType.COMPUTE))
 

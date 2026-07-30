@@ -10,11 +10,15 @@
 # OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Lustre-specific helpers: ``lfs df`` parsing and Lustre client detection.
+"""Lustre helpers: ``lfs``/``lctl`` protocol parsing plus the LNet transport layer.
 
-This module holds only the genuinely Lustre-specific logic. Shared-storage enumeration and the
-``/proc/mounts`` table live in :mod:`pcluster_diag.util.shared_storage`; the kernel-module probes this
-module builds on live in :mod:`pcluster_diag.util.kernel_module`.
+This module holds the Lustre-side logic: the ``lfs df`` / ``lfs check servers`` / ``lctl ...import``
+protocol parsing, and the LNet transport layer (parsing ``lnetctl net show`` / ``lnetctl peer show`` and
+the ``lnetctl ping`` reachability probe) -- LNet is Lustre's own networking layer, driven by ``lnetctl``.
+EFA *capability* (the ``kefalnd``/EFA driver modules and versions, EFA device count, p6+ family detection)
+lives in :mod:`pcluster_diag.util.efa`; shared-storage enumeration and the ``/proc/mounts`` table live in
+:mod:`pcluster_diag.util.shared_storage`; module-version reading/comparison lives in
+:mod:`pcluster_diag.util.kernel_module`.
 """
 
 import logging
@@ -24,12 +28,9 @@ from typing import List, Optional
 
 import yaml
 
-from pcluster_diag.core.constants import (
-    EFA_DRIVER_KERNEL_MODULE,
-    EFA_KEFALND_KERNEL_MODULE,
-    P6PLUS_INSTANCE_PREFIXES,
-)
+from pcluster_diag.core.constants import EFA_LNET_NET, FSX_EFA_PING_TIMEOUT_SECONDS, FSX_LNET_SHOW_TIMEOUT_SECONDS
 from pcluster_diag.util import kernel_module
+from pcluster_diag.util.shell import time_command
 
 logger = logging.getLogger(__name__)
 
@@ -113,77 +114,7 @@ def lustre_client_version() -> Optional[str]:
     return kernel_module.module_version("lustre")
 
 
-# --- EFA-for-Lustre client prerequisites ----------------------------------------------
-
-
-def efa_kefalnd_supported() -> bool:
-    """Return whether the Lustre client supports EFA, i.e. the ``kefalnd`` module is available.
-
-    This mirrors the official FSx EFA-Lustre client setup's definition of EFA support (it verifies that
-    ``modinfo kefalnd`` succeeds): a Lustre client with no ``kefalnd`` module cannot ride EFA no matter how
-    LNet is configured. See
-    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
-    """
-    return kernel_module.kernel_module_available(EFA_KEFALND_KERNEL_MODULE)
-
-
-def efa_driver_version() -> Optional[str]:
-    """Return the EFA driver kernel module version (``modinfo efa``), or None when unavailable."""
-    return kernel_module.module_version(EFA_DRIVER_KERNEL_MODULE)
-
-
-def efa_kefalnd_version() -> Optional[str]:
-    """Return the ``kefalnd`` (EFA LND) kernel module version, or None when unavailable."""
-    return kernel_module.module_version(EFA_KEFALND_KERNEL_MODULE)
-
-
-def is_p6plus_instance(instance_type: Optional[str]) -> Optional[bool]:
-    """Return whether ``instance_type`` is a p6+ family requiring the kefalnd version check.
-
-    Returns True/False for a known instance type, and ``None`` when the instance type is unknown (e.g. IMDS
-    could not be reached at context-build time). ``None`` lets the caller distinguish "known non-p6" (skip
-    the p6-only kefalnd version floor cleanly) from "could not determine the family" (report that the check
-    was skipped for lack of the instance type), rather than silently treating an unknown type as non-p6.
-
-    The kefalnd minimum-version requirement applies only to the p6+ families (see
-    ``P6PLUS_INSTANCE_PREFIXES``). See
-    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
-    """
-    if not instance_type:
-        return None
-    return any(instance_type.startswith(prefix) for prefix in P6PLUS_INSTANCE_PREFIXES)
-
-
-def version_at_least(actual: Optional[str], minimum: str) -> Optional[bool]:
-    """Return whether dotted version ``actual`` is >= ``minimum``, or ``None`` when it cannot be determined.
-
-    Returns True/False for a comparable ``actual``, and ``None`` when ``actual`` is missing or unparseable
-    (rather than conflating "could not determine the version" with "below the minimum"). This lets the
-    caller surface an unparseable version as a skipped/undeterminable check instead of a false too-old
-    error. Only the numeric dotted prefix is compared (e.g. ``2.15.6-1.fsx23`` -> ``[2, 15, 6]``), matching
-    the official setup's version check which strips non-numeric characters before comparing.
-    """
-    parsed_actual = _numeric_version(actual)
-    parsed_min = _numeric_version(minimum)
-    if parsed_actual is None or parsed_min is None:
-        return None
-    length = max(len(parsed_actual), len(parsed_min))
-    parsed_actual += [0] * (length - len(parsed_actual))
-    parsed_min += [0] * (length - len(parsed_min))
-    return parsed_actual >= parsed_min
-
-
-def _numeric_version(version: Optional[str]) -> Optional[List[int]]:
-    """Return the leading dotted-numeric components of ``version`` (e.g. ``2.15.6-1`` -> ``[2, 15, 6]``)."""
-    if not version:
-        return None
-    match = re.match(r"(\d+(?:\.\d+)*)", version.strip())
-    if not match:
-        return None
-    return [int(part) for part in match.group(1).split(".")]
-
-
-# --- lnetctl net show parsing ---------------------------------------------------------
+# --- LNet transport: lnetctl net show parsing -----------------------------------------
 
 
 @dataclass
@@ -297,6 +228,9 @@ def local_nids(nets: List[LnetNet], net_type: str) -> List[str]:
     return [ni.nid for ni in net.local_nis if ni.nid]
 
 
+# --- LNet transport: lnetctl peer show parsing ----------------------------------------
+
+
 def parse_lnet_peer_show(output: str) -> List[str]:
     """Return the peer nids parsed from ``lnetctl peer show`` YAML (empty when unparseable/none).
 
@@ -333,6 +267,39 @@ def nids_on_net(nids: List[str], net_type: str) -> List[str]:
             seen.add(nid)
             matched.append(nid)
     return matched
+
+
+# --- LNet transport: the lnetctl ping reachability probe ------------------------------
+
+
+def efa_peer_nid() -> Optional[str]:
+    """Return an ``@efa`` peer nid from ``lnetctl peer show``, or None when none is available."""
+    result = time_command(["lnetctl", "peer", "show"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
+    if result.timed_out or result.returncode != 0:
+        return None
+    efa_peers = nids_on_net(parse_lnet_peer_show(result.stdout), EFA_LNET_NET)
+    return efa_peers[0] if efa_peers else None
+
+
+def efa_ping_works(source_nid: str, peer_nid: str) -> bool:
+    """Return whether ``lnetctl ping --source <source_nid> <peer_nid>`` succeeds within the timeout.
+
+    A hang or a non-zero exit both mean the EFA data path is not working; only a clean success is True.
+    """
+    result = time_command(
+        ["lnetctl", "ping", "--source", source_nid, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS
+    )
+    return not (result.timed_out or result.returncode != 0)
+
+
+def _as_int(value) -> Optional[int]:
+    """Coerce ``value`` to an int, or None when it is missing or not an integer."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # --- lfs check servers parsing --------------------------------------------------------
@@ -463,13 +430,3 @@ def _scan_field(line: str, key: str) -> Optional[str]:
     if line.startswith(prefix):
         return line[len(prefix):].strip()
     return None
-
-
-def _as_int(value) -> Optional[int]:
-    """Coerce ``value`` to an int, or None when it is missing or not an integer."""
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None

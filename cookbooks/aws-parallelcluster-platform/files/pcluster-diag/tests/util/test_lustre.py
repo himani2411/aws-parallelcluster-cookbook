@@ -263,49 +263,47 @@ def test_parse_lctl_import_empty_when_no_blocks():
     assert lustre.parse_lctl_import("some noise\nno import here\n") == []
 
 
-# --- EFA-for-Lustre client prerequisites ----------------------------------------------
-
-import pytest  # noqa: E402
+# --- LNet ping (lnetctl peer show + ping) ---------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "actual, minimum, expected",
-    [
-        ("2.15.6", "2.15", True),
-        ("2.15", "2.15", True),
-        ("2.14.9", "2.15", False),
-        ("2.15.6-1.fsx23.el9", "2.15", True),  # only the numeric prefix is compared
-        ("1.1.1", "1.1.1", True),
-        ("1.0.0", "1.1.1", False),
-        ("2.12.1", "2.12.1", True),
-        # A version that cannot be determined yields None (undeterminable), not False (below-minimum).
-        (None, "2.15", None),
-        ("not-a-version", "2.15", None),
-    ],
-)
-def test_version_at_least(actual, minimum, expected):
-    assert lustre.version_at_least(actual, minimum) is expected
+def test_efa_peer_nid_returns_first_efa_peer(monkeypatch):
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: _completed_timed(stdout=_LNET_PEER_SHOW))
+    assert lustre.efa_peer_nid() == "10.0.1.5@efa"
 
 
-@pytest.mark.parametrize(
-    "instance_type, expected",
-    [
-        ("p6-b300.48xlarge", True),
-        ("p6-b200.48xlarge", True),
-        ("p6e-gb200.36xlarge", True),
-        ("p5.48xlarge", False),
-        ("c5n.18xlarge", False),
-        # An unknown instance type (e.g. IMDS unavailable at startup) is undeterminable, not "non-p6".
-        ("", None),
-        (None, None),
-    ],
-)
-def test_is_p6plus_instance(instance_type, expected):
-    assert lustre.is_p6plus_instance(instance_type) is expected
+def test_efa_peer_nid_none_when_no_efa_peer(monkeypatch):
+    tcp_only_peer = "peer:\n    - primary nid: 1.2.3.4@tcp\n"
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: _completed_timed(stdout=tcp_only_peer))
+    assert lustre.efa_peer_nid() is None
 
 
-def test_efa_kefalnd_supported_delegates_to_modinfo(monkeypatch):
-    monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: module == "kefalnd")
-    assert lustre.efa_kefalnd_supported() is True
-    monkeypatch.setattr(lustre.kernel_module, "kernel_module_available", lambda module: False)
-    assert lustre.efa_kefalnd_supported() is False
+def test_efa_peer_nid_none_on_command_failure(monkeypatch):
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: _completed_timed(returncode=1))
+    assert lustre.efa_peer_nid() is None
+
+
+def test_efa_ping_works_true_on_success(monkeypatch):
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: _completed_timed(stdout="ok"))
+    assert lustre.efa_ping_works("10.0.0.1@efa", "10.0.1.5@efa") is True
+
+
+def test_efa_ping_works_false_on_nonzero_or_timeout(monkeypatch):
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: _completed_timed(returncode=1))
+    assert lustre.efa_ping_works("10.0.0.1@efa", "10.0.1.5@efa") is False
+    hung = _completed_timed(timed_out=True, returncode=None)
+    monkeypatch.setattr(lustre, "time_command", lambda command, timeout: hung)
+    assert lustre.efa_ping_works("10.0.0.1@efa", "10.0.1.5@efa") is False
+
+
+def _completed_timed(returncode=0, stdout="", stderr="", timed_out=False):
+    """Build a TimedCommand double for the lnetctl peer/ping helpers."""
+    from pcluster_diag.util.shell import TimedCommand
+
+    return TimedCommand(
+        command=["lnetctl"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        elapsed_seconds=0.01,
+        timed_out=timed_out,
+    )

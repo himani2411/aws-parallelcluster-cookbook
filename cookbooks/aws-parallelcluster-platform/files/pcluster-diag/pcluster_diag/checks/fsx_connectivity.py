@@ -51,7 +51,6 @@ Both checks run on every node type that has a FsxLustre mount configured, and sk
 """
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import List
 
@@ -60,7 +59,6 @@ from pcluster_diag.core.constants import (
     EFA_KEFALND_KERNEL_MODULE,
     EFA_LNET_NET,
     EFA_LUSTRE_SYSTEMD_SERVICE,
-    FSX_EFA_PING_TIMEOUT_SECONDS,
     FSX_LFS_CHECK_TIMEOUT_SECONDS,
     FSX_LFS_DF_TIMEOUT_SECONDS,
     FSX_LNET_SHOW_TIMEOUT_SECONDS,
@@ -75,7 +73,7 @@ from pcluster_diag.models.check import Check
 from pcluster_diag.models.context import Context
 from pcluster_diag.models.finding import CheckError, CheckInfo, CheckWarning
 from pcluster_diag.models.result import INTERNAL_ERROR_CODE, Result
-from pcluster_diag.util import kernel_module, lustre, services, shared_storage
+from pcluster_diag.util import efa, kernel_module, lustre, services, shared_storage
 from pcluster_diag.util.shell import time_command
 
 logger = logging.getLogger(__name__)
@@ -84,15 +82,6 @@ logger = logging.getLogger(__name__)
 def _has_lustre(context: Context) -> bool:
     """Return whether the cluster configuration declares at least one FsxLustre mount."""
     return bool(shared_storage.lustre_mounts(context))
-
-
-def _efa_device_count() -> int:
-    """Return the number of EFA/RDMA devices exposed under ``/sys/class/infiniband`` (0 when none)."""
-    try:
-        return len(os.listdir(EFA_INFINIBAND_SYSFS))
-    except OSError as error:
-        logger.warning("Could not list %s: %s", EFA_INFINIBAND_SYSFS, error)
-        return 0
 
 
 @dataclass
@@ -297,7 +286,7 @@ class LustreFilesystem(Check):
             # unparseable). We do not mask the None case: rather than silently skip it, we report a
             # CHECK_ERROR (reserved E0) saying the floor could not be evaluated -- distinct from a definite
             # too-old FAILURE.
-            at_least = lustre.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION)
+            at_least = kernel_module.version_at_least(version, MIN_LUSTRE_CLIENT_VERSION)
             if at_least is None:
                 errors.append(self.CLIENT_VERSION_UNDETERMINABLE.format(version, MIN_LUSTRE_CLIENT_VERSION))
             elif at_least is False:
@@ -408,7 +397,7 @@ class LustreFilesystem(Check):
             return
 
         bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
-        available = _efa_device_count()
+        available = efa.efa_device_count()
         if available == 0:
             errors.append(self.NO_EFA_DEVICES.format(EFA_INFINIBAND_SYSFS))
         elif len(bound) < available:
@@ -430,7 +419,7 @@ class LustreFilesystem(Check):
         CHECK_ERROR (reserved E0) noting the check could not be evaluated, distinct from a definite too-old
         FAILURE.
         """
-        if not lustre.efa_kefalnd_supported():
+        if not efa.efa_kefalnd_supported():
             errors.append(self.KEFALND_MISSING)
             return False
 
@@ -440,12 +429,12 @@ class LustreFilesystem(Check):
 
     def _check_efa_driver_version(self, errors: List[CheckError], infos: List[CheckInfo]) -> None:
         """Report the EFA driver version; flag definitely-too-old as FAILURE and undeterminable as E0."""
-        driver_version = lustre.efa_driver_version()
+        driver_version = efa.efa_driver_version()
         if not driver_version:
             errors.append(self.EFA_DRIVER_VERSION_UNDETERMINABLE.format(MIN_EFA_DRIVER_VERSION))
             return
         infos.append(self.EFA_DRIVER_VERSION.format(driver_version))
-        at_least = lustre.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION)
+        at_least = kernel_module.version_at_least(driver_version, MIN_EFA_DRIVER_VERSION)
         if at_least is None:
             # Present but unparseable -- the floor could not be evaluated; report it, do not assume too-old.
             errors.append(self.EFA_DRIVER_VERSION_UNDETERMINABLE.format(MIN_EFA_DRIVER_VERSION))
@@ -459,11 +448,11 @@ class LustreFilesystem(Check):
         is_p6plus_instance returns None: we cannot tell whether the p6+ floor applies, so we surface a
         CHECK_ERROR (reserved E0) that the check could not be evaluated rather than silently passing.
         """
-        kefalnd_version = lustre.efa_kefalnd_version()
+        kefalnd_version = efa.efa_kefalnd_version()
         if kefalnd_version:
             infos.append(self.KEFALND_VERSION.format(kefalnd_version))
 
-        p6plus = lustre.is_p6plus_instance(context.instance_type)
+        p6plus = efa.is_p6plus_instance(context.instance_type)
         if p6plus is None:
             errors.append(self.INSTANCE_TYPE_UNDETERMINABLE.format(EFA_KEFALND_KERNEL_MODULE, MIN_KEFALND_VERSION_P6))
             return
@@ -475,7 +464,7 @@ class LustreFilesystem(Check):
         if not kefalnd_version:
             errors.append(self.KEFALND_VERSION_UNDETERMINABLE.format(MIN_KEFALND_VERSION_P6))
             return
-        at_least = lustre.version_at_least(kefalnd_version, MIN_KEFALND_VERSION_P6)
+        at_least = kernel_module.version_at_least(kefalnd_version, MIN_KEFALND_VERSION_P6)
         if at_least is None:
             errors.append(self.KEFALND_VERSION_UNDETERMINABLE.format(MIN_KEFALND_VERSION_P6))
         elif at_least is False:
@@ -515,7 +504,7 @@ class LustreFilesystem(Check):
         return warnings
 
     def _efa_ping_errors(self, nets) -> List[CheckError]:
-        """Ping an @efa peer over EFA (the FSx tutorial's own validation); error when the data path fails.
+        """Ping an @efa peer over EFA (the tutorial's own validation); error when the data path fails.
 
         Automates ``lnetctl ping --source <local>@efa <peer>@efa``. Discovers a local @efa nid and a peer
         @efa nid from ``lnetctl``; when either is unavailable there is nothing to ping, so the probe is
@@ -524,22 +513,13 @@ class LustreFilesystem(Check):
         local = lustre.local_nids(nets, EFA_LNET_NET)
         if not local:
             return []
-        peer_nid = self._efa_peer_nid()
+        peer_nid = lustre.efa_peer_nid()
         if peer_nid is None:
             return []
         source = local[0]
-        result = time_command(["lnetctl", "ping", "--source", source, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS)
-        if result.timed_out or result.returncode != 0:
+        if not lustre.efa_ping_works(source, peer_nid):
             return [self.EFA_PING_FAILED.format(source, peer_nid)]
         return []
-
-    def _efa_peer_nid(self):
-        """Return an @efa peer nid from ``lnetctl peer show``, or None when none is available."""
-        result = time_command(["lnetctl", "peer", "show"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
-        if result.timed_out or result.returncode != 0:
-            return None
-        efa_peers = lustre.nids_on_net(lustre.parse_lnet_peer_show(result.stdout), EFA_LNET_NET)
-        return efa_peers[0] if efa_peers else None
 
     def _tcp_fallback_warnings(self, nets) -> List[CheckWarning]:
         """Return a warning per target connected over @tcp while an @efa net is configured."""

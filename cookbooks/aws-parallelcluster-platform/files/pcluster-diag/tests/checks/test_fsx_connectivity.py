@@ -580,9 +580,9 @@ def test_efa_all_bound_and_pinging_no_error(monkeypatch):
     assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
 
 
-def test_efa_partial_bind_is_not_an_error(monkeypatch):
-    # 1 of 16 devices bound: legitimate on subset-binding families, so it must NOT be an error -- just an
-    # info reporting the count. Only zero-bound is a failure.
+def test_efa_partial_bind_on_unknown_instance_type_is_not_an_error(monkeypatch):
+    # 1 of 16 bound on an instance type with no expected-count entry (the sample context's fake type):
+    # we make no underbinding assertion, so it is an info + pass, not an error.
     _patch_efa_prereqs(monkeypatch)
     _route_time_command(
         monkeypatch,
@@ -600,8 +600,56 @@ def test_efa_partial_bind_is_not_an_error(monkeypatch):
     )
 
     assert LustreFilesystem.NO_DEVICES_BOUND.code not in _codes(errors)
+    assert LustreFilesystem.UNDERBOUND_DEVICES.code not in _codes(errors)
     assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
     assert "1 of 16" in _messages(infos)
+
+
+def test_efa_underbound_fails_on_bind_all_family(monkeypatch):
+    # A "bind all" family (expected == available) with only 1 of 16 bound: the incident signature -> error.
+    _patch_efa_prereqs(monkeypatch)
+    _route_time_command(
+        monkeypatch,
+        {
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ping ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 16)
+    context = sample_context_with_lustre(NodeType.COMPUTE)
+    context.instance_type = "p6-b300.48xlarge"
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(context, _snapshot(_LNET_EFA_PARTIAL_BIND), errors, warnings, infos)
+
+    assert LustreFilesystem.UNDERBOUND_DEVICES.code in _codes(errors)
+    assert "1 of 16" in _messages(errors)
+
+
+def test_efa_subset_bind_family_meeting_expected_passes(monkeypatch):
+    # p5.48xlarge binds 8 by design. With 8 of 16 bound, the expected count is met -> pass, no error.
+    _patch_efa_prereqs(monkeypatch)
+    _route_time_command(
+        monkeypatch,
+        {
+            "peer show": _timed(stdout=_LNET_PEER_EFA),
+            "ping": _timed(stdout="ping ok"),
+            "import": _timed(stdout=_IMPORT_EFA),
+        },
+    )
+    monkeypatch.setattr(fsx_connectivity.efa, "efa_device_count", lambda: 16)
+    eight_bound = ["efa%d" % i for i in range(8)]
+    monkeypatch.setattr(fsx_connectivity.lustre, "lnet_bound_interfaces", lambda nets, net_type: eight_bound)
+    context = sample_context_with_lustre(NodeType.COMPUTE)
+    context.instance_type = "p5.48xlarge"
+    errors, warnings, infos = [], [], []
+
+    LustreFilesystem()._probe_efa(context, _snapshot(_LNET_EFA_PARTIAL_BIND), errors, warnings, infos)
+
+    assert LustreFilesystem.UNDERBOUND_DEVICES.code not in _codes(errors)
+    assert LustreFilesystem.NO_DEVICES_BOUND.code not in _codes(errors)
+    assert LustreFilesystem.BOUND_DEVICES.code in _codes(infos)
 
 
 def test_efa_no_devices_bound_fails(monkeypatch):

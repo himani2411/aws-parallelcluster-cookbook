@@ -23,6 +23,7 @@ from typing import Optional
 
 from pcluster_diag.core.constants import (
     EFA_DRIVER_KERNEL_MODULE,
+    EFA_EXPECTED_BOUND_DEVICES,
     EFA_INFINIBAND_SYSFS,
     EFA_KEFALND_KERNEL_MODULE,
     P6PLUS_INSTANCE_PREFIXES,
@@ -75,6 +76,26 @@ def _is_efa_device(name: str) -> bool:
     except OSError as error:
         logger.warning("Could not resolve the driver for %s: %s", name, error)
         return False
+
+
+def expected_bound_device_count(instance_type: Optional[str], available: int) -> Optional[int]:
+    """Return how many EFA devices the official setup binds on ``instance_type``, or None when unknown.
+
+    ``available`` is the number of EFA devices actually present (an explicit integer count is capped at it,
+    so we never expect more than exist). Returns:
+      - an int: the expected number of bound devices for this instance type;
+      - None: no static expectation -- the type is not in the table, its selection is dynamic (e.g.
+        p6e-gb200 binds only host-connected devices), or the instance type is unknown. The caller then
+        makes no underbinding assertion beyond "at least one device must be bound".
+    """
+    if not instance_type:
+        return None
+    expected = EFA_EXPECTED_BOUND_DEVICES.get(instance_type)
+    if expected is None:
+        return None
+    if expected == "all":
+        return available
+    return min(expected, available)
 
 
 def is_p6plus_instance(instance_type: Optional[str]) -> Optional[bool]:

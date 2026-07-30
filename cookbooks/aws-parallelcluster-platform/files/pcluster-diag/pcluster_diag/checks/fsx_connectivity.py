@@ -36,10 +36,12 @@ executes each probe in isolation and aggregates their findings. The probes are:
   EFA prerequisites the way the official FSx EFA-Lustre client setup does -- the ``kefalnd`` module (that
   setup's own definition of "the Lustre client supports EFA"), the EFA driver version, and, on the p6+
   instance families, the kefalnd version -- then the state of the ``configure-efa-fsx-lustre-client.service``
-  that (re)configures LNet on every boot, then detects two common root causes: no EFA device bound to LNet
-  at all (so Lustre falls back to TCP) and a non-working EFA data path (typically a missing
-  self-referencing security-group rule). A partial bind is not treated as a failure -- several instance
-  families bind only a subset of their EFA devices to LNet by design.
+  that (re)configures LNet on every boot, then detects common root causes: no EFA device bound to LNet at
+  all (so Lustre falls back to TCP), fewer devices bound than the instance type is expected to bind (the
+  expected count comes from a per-instance-family table, NOT the raw device count -- several families bind
+  only a subset by design, and instance types with no known/static expectation are not flagged beyond the
+  "none bound" case), and a non-working EFA data path (typically a missing self-referencing security-group
+  rule).
   See https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
 
 :class:`FsxTargetsAreReachable` is kept separate because it is a heavier, opt-in
@@ -173,6 +175,11 @@ class LustreFilesystem(Check):
         "{} EFA devices are exposed but none are bound to LNet -- Lustre will fall back to TCP. "
         "Re-run the EFA-Lustre client configuration.",
     )
+    UNDERBOUND_DEVICES = CheckError(
+        17,
+        "Only {} of {} expected EFA devices are bound to LNet on {} -- Lustre will not use the full EFA "
+        "fabric. Re-run the EFA-Lustre client configuration.",
+    )
     EFA_PING_FAILED = CheckError(
         11,
         "EFA ping from {} to {} failed -- the EFA data path is not working. Check the security group "
@@ -221,6 +228,12 @@ class LustreFilesystem(Check):
     )
     EFA_DRIVER_VERSION = CheckInfo(6, "EFA driver version: {}.")
     KEFALND_VERSION = CheckInfo(7, "kefalnd (EFA LND) version: {}.")
+    EFA_BINDING_REFERENCE = CheckInfo(
+        8,
+        "EFA-for-Lustre binding follows the FSx guide -- the expected number of EFA devices bound to LNet "
+        "is instance-type-specific (some families bind a subset by design). See "
+        "https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html",
+    )
 
     @property
     def description(self) -> str:
@@ -404,14 +417,23 @@ class LustreFilesystem(Check):
 
         bound = lustre.lnet_bound_interfaces(lnet.nets, EFA_LNET_NET)
         available = efa.efa_device_count()
+        expected = efa.expected_bound_device_count(context.instance_type, available)
+        # Note (once) that the expected binding is instance-type-specific per the FSx guide, so an operator
+        # reading the device-count findings knows "fewer than all bound" can be intentional.
+        infos.append(self.EFA_BINDING_REFERENCE)
         if available == 0:
             errors.append(self.NO_EFA_DEVICES.format(EFA_INFINIBAND_SYSFS))
         elif not bound:
-            # No EFA device bound to LNet at all, while devices exist: Lustre cannot ride EFA. A *partial*
-            # bind (0 < bound < available) is not flagged -- several instance families bind only a subset
-            # by design, so "fewer than all" is legitimate and only the count is reported below.
+            # EFA devices exist but none are bound at all: Lustre cannot ride EFA on any family.
             errors.append(self.NO_DEVICES_BOUND.format(available))
+        elif expected is not None and len(bound) < expected:
+            # We know how many this instance type should bind, and fewer are bound -- a genuine shortfall
+            # (e.g. the p6-b300 "bind all" family with only a subset bound). Compared against the expected
+            # count, NOT the raw device count, so families that bind a subset by design do not false-fire.
+            errors.append(self.UNDERBOUND_DEVICES.format(len(bound), expected, context.instance_type))
         else:
+            # All expected devices are bound, or we have no static expectation for this instance type
+            # (unknown/dynamic selection) -- report the count as context and pass.
             infos.append(self.BOUND_DEVICES.format(len(bound), available))
 
         warnings.extend(self._traffic_warnings(efa_net))

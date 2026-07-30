@@ -122,27 +122,44 @@ LUSTRE_STORAGE_TYPE = "FsxLustre"
 NFS_STORAGE_TYPES = ("FsxOntap", "FsxOpenZfs", "Efs")
 # The osc/mdc import ``state:`` value indicating a reachable, fully-connected target.
 HEALTHY_TARGET_STATE = "FULL"
+# --- EFA-for-Lustre client parameters -----------------------------------------------------
+# TODO/TO-CHECK: every value in this section mirrors the FSx EFA-Lustre client setup, which we cannot
+# import. If that setup bumps a version floor, adds/renames a p6+ family, or changes how many EFA devices a
+# family binds, re-sync the constants below or these checks will drift and under/over-report. Source:
+# https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+#
 # The LNet net type for the EFA LND (kefalnd).
 EFA_LNET_NET = "efa"
 # EFA/RDMA devices surface here; the count is compared against the devices bound to LNet.
 EFA_INFINIBAND_SYSFS = "/sys/class/infiniband"
 # The EFA driver kernel module (its version gates the EFA-Lustre path).
 EFA_DRIVER_KERNEL_MODULE = "efa"
-# The kefalnd kernel module (the EFA LND). Its presence is how the official FSx EFA-Lustre client setup
-# defines "this Lustre client supports EFA" (it verifies that ``modinfo kefalnd`` succeeds), so it is a
-# prerequisite for any EFA-for-Lustre probing, checked before the data-path probes run. See
-# https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+# The kefalnd kernel module (the EFA LND). Its presence is how the setup defines "this Lustre client
+# supports EFA" (it verifies that ``modinfo kefalnd`` succeeds), so it is a prerequisite for any
+# EFA-for-Lustre probing, checked before the data-path probes run.
 EFA_KEFALND_KERNEL_MODULE = "kefalnd"
-# Minimum versions the official FSx EFA-Lustre client setup enforces before configuring EFA.
-# NOTE: these mirror values owned by the FSx EFA-Lustre client setup (we cannot import them). If that
-# setup bumps a floor, re-sync the values below or these checks will under/over-report. Source:
-# https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+# Minimum versions the setup enforces before configuring EFA.
 MIN_EFA_DRIVER_VERSION = "2.12.1"
 MIN_KEFALND_VERSION_P6 = "1.1.1"  # kefalnd floor, enforced on p6+ instances only
 MIN_LUSTRE_CLIENT_VERSION = "2.15"
 # Instance-family prefixes that require the kefalnd version check (the p6+ families).
-# NOTE: also owned by the FSx EFA-Lustre client setup -- re-sync if it adds/renames a p6+ family.
 P6PLUS_INSTANCE_PREFIXES = ("p6-b200", "p6e-gb200", "p6-b300")
+
+# How many EFA devices the setup binds to LNet, keyed by exact instance type. It binds an
+# instance-type-specific SUBSET on some families (not always all devices), so the "expected bound" count is
+# this table -- NOT the raw device count. Value semantics:
+#   int   -> exactly this many devices are bound (capped at the number actually present)
+#   "all" -> all present EFA devices are bound
+# An instance type NOT in this table has no static expected count -- either its selection is dynamic
+# (e.g. p6e-gb200 binds only host-connected devices, which we cannot count statically) or we have no data
+# for it -- so the underbinding check is skipped for it (only a total absence of bound devices is flagged).
+EFA_EXPECTED_BOUND_DEVICES = {
+    "p5.48xlarge": 8,
+    "p5e.48xlarge": 8,
+    "p5en.48xlarge": 8,
+    "p6-b200.48xlarge": "all",
+    "p6-b300.48xlarge": "all",
+}
 # The systemd oneshot service the FSx EFA-Lustre client setup installs to (re)configure LNet on every
 # boot. Its state is the persistence/health signal for this delivery vehicle.
 EFA_LUSTRE_SYSTEMD_SERVICE = "configure-efa-fsx-lustre-client.service"

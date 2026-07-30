@@ -317,15 +317,15 @@ class LustreFilesystem(Check):
 
     def _probe_mount(self, mount_dir: str) -> List[CheckError]:
         """Return the CheckErrors for one Lustre mount: empty when it is reachable and all targets are up."""
-        timed = time_command(["lfs", "df", "-h", mount_dir], timeout=FSX_LFS_DF_TIMEOUT_SECONDS)
-        if timed.timed_out:
+        result = time_command(["lfs", "df", "-h", mount_dir], timeout=FSX_LFS_DF_TIMEOUT_SECONDS)
+        if result.timed_out:
             return [self.LFS_DF_TIMED_OUT.format(mount_dir, FSX_LFS_DF_TIMEOUT_SECONDS)]
-        if timed.returncode != 0:
-            return [self.LFS_DF_FAILED.format(mount_dir, timed.stderr.strip())]
+        if result.returncode != 0:
+            return [self.LFS_DF_FAILED.format(mount_dir, result.stderr.strip())]
 
         return [
             self.TARGET_UNAVAILABLE.format(target.uuid, mount_dir)
-            for target in lustre.unavailable_targets(timed.stdout)
+            for target in lustre.unavailable_targets(result.stdout)
         ]
 
     def _probe_lnet(
@@ -528,31 +528,31 @@ class LustreFilesystem(Check):
         if peer_nid is None:
             return []
         source = local[0]
-        timed = time_command(["lnetctl", "ping", "--source", source, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS)
-        if timed.timed_out or timed.returncode != 0:
+        result = time_command(["lnetctl", "ping", "--source", source, peer_nid], timeout=FSX_EFA_PING_TIMEOUT_SECONDS)
+        if result.timed_out or result.returncode != 0:
             return [self.EFA_PING_FAILED.format(source, peer_nid)]
         return []
 
     def _efa_peer_nid(self):
         """Return an @efa peer nid from ``lnetctl peer show``, or None when none is available."""
-        timed = time_command(["lnetctl", "peer", "show"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
-        if timed.timed_out or timed.returncode != 0:
+        result = time_command(["lnetctl", "peer", "show"], timeout=FSX_LNET_SHOW_TIMEOUT_SECONDS)
+        if result.timed_out or result.returncode != 0:
             return None
-        efa_peers = lustre.nids_on_net(lustre.parse_lnet_peer_show(timed.stdout), EFA_LNET_NET)
+        efa_peers = lustre.nids_on_net(lustre.parse_lnet_peer_show(result.stdout), EFA_LNET_NET)
         return efa_peers[0] if efa_peers else None
 
     def _tcp_fallback_warnings(self, nets) -> List[CheckWarning]:
         """Return a warning per target connected over @tcp while an @efa net is configured."""
         if lustre.lnet_net(nets, EFA_LNET_NET) is None:
             return []
-        timed = time_command(
+        result = time_command(
             ["lctl", "get_param", "osc.*.import", "mdc.*.import"], timeout=FSX_OST_QUERY_TIMEOUT_SECONDS
         )
-        if timed.timed_out or timed.returncode != 0:
+        if result.timed_out or result.returncode != 0:
             return []
         return [
             self.TCP_FALLBACK.format(state.target or state.param)
-            for state in lustre.parse_lctl_import(timed.stdout)
+            for state in lustre.parse_lctl_import(result.stdout)
             if state.connected_over == "tcp"
         ]
 
@@ -607,26 +607,26 @@ class FsxTargetsAreReachable(Check):
 
     def _check_servers(self) -> List[CheckError]:
         """Return CheckErrors from ``lfs check servers``: a hang, a command failure, or per-target errors."""
-        timed = time_command(["lfs", "check", "servers"], timeout=FSX_LFS_CHECK_TIMEOUT_SECONDS)
-        if timed.timed_out:
+        result = time_command(["lfs", "check", "servers"], timeout=FSX_LFS_CHECK_TIMEOUT_SECONDS)
+        if result.timed_out:
             return [self.LFS_CHECK_TIMED_OUT.format(FSX_LFS_CHECK_TIMEOUT_SECONDS)]
-        if timed.returncode != 0:
-            return [self.LFS_CHECK_FAILED.format(timed.stderr.strip())]
+        if result.returncode != 0:
+            return [self.LFS_CHECK_FAILED.format(result.stderr.strip())]
         return [
             self.TARGET_UNREACHABLE.format(server.target, server.detail)
-            for server in lustre.unreachable_servers(timed.stdout)
+            for server in lustre.unreachable_servers(result.stdout)
         ]
 
     def _check_imports(self):
         """Return (errors, infos) from client-side import state: non-FULL targets and failover pinning."""
         errors: List[CheckError] = []
         infos: List[CheckInfo] = []
-        timed = time_command(
+        result = time_command(
             ["lctl", "get_param", "osc.*.import", "mdc.*.import"], timeout=FSX_OST_QUERY_TIMEOUT_SECONDS
         )
-        if timed.timed_out or timed.returncode != 0:
+        if result.timed_out or result.returncode != 0:
             return errors, infos
-        for state in lustre.parse_lctl_import(timed.stdout):
+        for state in lustre.parse_lctl_import(result.stdout):
             name = state.target or state.param
             if not state.healthy:
                 errors.append(self.IMPORT_NOT_FULL.format(name, state.state or "unknown", HEALTHY_TARGET_STATE))
